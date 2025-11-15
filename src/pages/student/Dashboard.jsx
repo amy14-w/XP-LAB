@@ -1,21 +1,58 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Trophy, Users, UserCircle, Play, Circle, Diamond, Flame, Award } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../context/AuthContext';
+import { studentsAPI } from '../../services/api';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [selectedChapter, setSelectedChapter] = useState(null);
+  const [studentData, setStudentData] = useState({
+    name: 'Student',
+    course: 'N/A',
+    points: 0,
+    streak: 0,
+    rank: 'Bronze',
+    level: 1,
+  });
+  const [loading, setLoading] = useState(true);
 
-  // Mock student data
-  const studentData = {
-    name: 'Alex Johnson',
-    course: 'CSC2720',
-    points: 1250,
-    streak: 7,
-    rank: 'Gold',
-    level: 12,
-  };
+  useEffect(() => {
+    const fetchStudentData = async () => {
+      if (!user?.user_id) return;
+      
+      try {
+        setLoading(true);
+        const profile = await studentsAPI.getProfile(user.user_id);
+        const streaks = await studentsAPI.getStreaks(user.user_id);
+        
+        // Get highest streak
+        const maxStreak = streaks.length > 0 
+          ? Math.max(...streaks.map(s => s.current_streak || 0))
+          : 0;
+        
+        // Calculate level from points (rough estimate: level = points / 100)
+        const level = Math.floor(profile.total_points / 100) + 1;
+        
+        setStudentData({
+          name: user.email?.split('@')[0] || 'Student',
+          course: 'N/A', // Could fetch enrolled classes later
+          points: profile.total_points || 0,
+          streak: maxStreak,
+          rank: profile.rank || 'bronze',
+          level: level,
+        });
+      } catch (error) {
+        console.error('Failed to fetch student data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchStudentData();
+  }, [user]);
 
   const chapters = [
     {
@@ -100,8 +137,11 @@ const StudentDashboard = () => {
             </div>
             <div className="flex items-center gap-2">
               <Award className="text-yellow-500" size={24} />
-              <span className="text-xl font-semibold">{studentData.rank}</span>
+              <span className="text-xl font-semibold capitalize">{studentData.rank}</span>
             </div>
+            {loading && (
+              <div className="text-sm text-slate-400">Loading...</div>
+            )}
           </div>
         </div>
       </div>

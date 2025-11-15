@@ -1,16 +1,54 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Trophy, Users, UserCircle, Play, Flame, Award, Medal, Crown } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { studentsAPI } from '../../services/api';
 
 const Leaderboard = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [leaderboardData, setLeaderboardData] = useState([]);
+  const [currentUser, setCurrentUser] = useState({ rank: 0 });
+  const [loading, setLoading] = useState(true);
 
-  const currentUser = {
-    id: 'student-1',
-    name: 'Alex Johnson',
-    rank: 15,
-  };
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (!user?.user_id) return;
+      
+      try {
+        setLoading(true);
+        const leaderboard = await studentsAPI.getLeaderboard(null, user.user_id);
+        
+        // Transform backend data to match frontend format
+        const transformed = (leaderboard || []).map((student, index) => ({
+          id: student.student_id,
+          name: student.email?.split('@')[0] || `Student ${index + 1}`,
+          points: student.total_points || 0,
+          streak: student.current_streak || 0,
+          rank: student.rank || 'bronze',
+          avatar: student.email?.substring(0, 2).toUpperCase() || 'ST',
+        })).sort((a, b) => b.points - a.points);
+        
+        setLeaderboardData(transformed);
+        
+        // Find current user's rank
+        const userIndex = transformed.findIndex(s => s.id === user.user_id);
+        if (userIndex >= 0) {
+          setCurrentUser({ rank: userIndex + 1 });
+        }
+      } catch (error) {
+        console.error('Failed to fetch leaderboard:', error);
+        // Fallback to empty array
+        setLeaderboardData([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchLeaderboard();
+  }, [user]);
 
-  const leaderboardData = [
+  const leaderboardDataMock = [
     { id: 1, name: 'Sarah Chen', points: 2850, streak: 21, rank: 'Platinum', avatar: 'SC' },
     { id: 2, name: 'Mike Thompson', points: 2720, streak: 18, rank: 'Platinum', avatar: 'MT' },
     { id: 3, name: 'Emily Rodriguez', points: 2590, streak: 15, rank: 'Gold', avatar: 'ER' },
@@ -119,7 +157,14 @@ const Leaderboard = () => {
               </select>
             </div>
 
+            {loading ? (
+              <div className="text-center py-12 text-slate-400">Loading leaderboard...</div>
+            ) : leaderboardData.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">No leaderboard data available yet.</div>
+            ) : (
+            <>
             {/* Top 3 Podium */}
+            {leaderboardData.length >= 3 && (
             <div className="grid grid-cols-3 gap-4 mb-8 items-end">
               {/* 2nd Place */}
               <div className="glass-card p-6 text-center">
@@ -160,13 +205,14 @@ const Leaderboard = () => {
                 <p className="text-sm text-slate-400">XP</p>
               </div>
             </div>
+            )}
 
             {/* Full Leaderboard */}
             <div className="glass-card p-6">
               <h3 className="text-xl font-bold mb-4">Full Rankings</h3>
               <div className="space-y-2">
                 {leaderboardData.map((student, index) => {
-                  const isCurrentUser = student.id === currentUser.id;
+                      const isCurrentUser = student.id === user?.user_id;
                   return (
                     <div
                       key={student.id}
@@ -181,7 +227,7 @@ const Leaderboard = () => {
                           {index < 3 ? (
                             getPositionIcon(index + 1)
                           ) : (
-                            <span className="text-xl font-bold text-slate-400">#{student.id}</span>
+                            <span className="text-xl font-bold text-slate-400">#{index + 1}</span>
                           )}
                         </div>
                         <div className={`w-12 h-12 bg-gradient-to-br ${getRankColor(student.rank)} rounded-full flex items-center justify-center font-bold`}>
@@ -234,6 +280,8 @@ const Leaderboard = () => {
                 </div>
               </div>
             </div>
+            </>
+            )}
           </div>
         </div>
       </div>

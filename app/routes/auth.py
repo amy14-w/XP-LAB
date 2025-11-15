@@ -13,9 +13,31 @@ async def register(user_data: UserCreate):
         response = supabase.auth.sign_up({
             "email": user_data.email,
             "password": user_data.password,
+            "options": {
+                "data": {
+                    "role": user_data.role.value
+                }
+            }
         })
         
         if response.user:
+            # Check if email confirmation is required
+            if not response.session:
+                # Email confirmation required - user created but not signed in
+                # Store user role in a custom table
+                supabase.table("users").insert({
+                    "user_id": response.user.id,
+                    "email": user_data.email,
+                    "role": user_data.role.value
+                }).execute()
+                
+                return {
+                    "message": "User registered successfully. Please check your email to confirm your account.",
+                    "user_id": response.user.id,
+                    "email_confirmation_required": True
+                }
+            
+            # Email confirmation not required - user is signed in
             # Store user role in a custom table
             supabase.table("users").insert({
                 "user_id": response.user.id,
@@ -23,11 +45,29 @@ async def register(user_data: UserCreate):
                 "role": user_data.role.value
             }).execute()
             
-            return {"message": "User registered successfully", "user_id": response.user.id}
+            # Get user role
+            user_data_result = supabase.table("users").select("*").eq("user_id", response.user.id).execute()
+            role = user_data_result.data[0]["role"] if user_data_result.data else user_data.role.value
+            
+            return {
+                "message": "User registered successfully",
+                "user_id": response.user.id,
+                "access_token": response.session.access_token,
+                "email": response.user.email,
+                "role": role,
+                "email_confirmation_required": False
+            }
         else:
             raise HTTPException(status_code=400, detail="Registration failed")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Extract more specific error message from Supabase
+        error_message = str(e)
+        if "already registered" in error_message.lower() or "already exists" in error_message.lower():
+            raise HTTPException(status_code=400, detail="Email already registered")
+        elif "email" in error_message.lower() and "confirm" in error_message.lower():
+            raise HTTPException(status_code=400, detail="Email confirmation required. Please check your email.")
+        else:
+            raise HTTPException(status_code=400, detail=f"Registration failed: {error_message}")
 
 
 @router.post("/login")

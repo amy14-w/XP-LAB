@@ -1,22 +1,72 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BookOpen, Trophy, Users, UserCircle, Play, Flame, Award, TrendingUp, Target } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from '../../context/AuthContext';
+import { studentsAPI } from '../../services/api';
 
 const StudentProfile = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [studentData, setStudentData] = useState({
+    name: 'Student',
+    email: '',
+    course: 'N/A',
+    points: 0,
+    streak: 0,
+    rank: 'Bronze',
+    level: 1,
+    totalLessons: 0,
+    completedLessons: 0,
+    participationScore: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [questionStats, setQuestionStats] = useState({ total_correct: 0, total_answered: 0, accuracy: 0 });
+  const [badges, setBadges] = useState([]);
 
-  const studentData = {
-    name: 'Alex Johnson',
-    email: 'alex.johnson@university.edu',
-    course: 'CSC2720',
-    points: 1250,
-    streak: 7,
-    rank: 'Gold',
-    level: 12,
-    totalLessons: 45,
-    completedLessons: 28,
-    participationScore: 85,
-  };
+  useEffect(() => {
+    const fetchProfileData = async () => {
+      if (!user?.user_id) return;
+      
+      try {
+        setLoading(true);
+        const profile = await studentsAPI.getProfile(user.user_id);
+        const streaks = await studentsAPI.getStreaks(user.user_id);
+        const stats = await studentsAPI.getQuestionStats(user.user_id);
+        const badgesData = await studentsAPI.getBadges(user.user_id);
+        
+        // Get highest streak
+        const maxStreak = streaks.length > 0 
+          ? Math.max(...streaks.map(s => s.current_streak || 0))
+          : 0;
+        
+        // Calculate level from points
+        const level = Math.floor(profile.total_points / 100) + 1;
+        
+        setStudentData({
+          name: user.email?.split('@')[0] || 'Student',
+          email: user.email || '',
+          course: 'N/A', // Could fetch enrolled classes later
+          points: profile.total_points || 0,
+          streak: maxStreak,
+          rank: profile.rank || 'bronze',
+          level: level,
+          totalLessons: 0, // Would need backend endpoint for this
+          completedLessons: 0, // Would need backend endpoint for this
+          participationScore: stats.accuracy || 0,
+        });
+        
+        setQuestionStats(stats);
+        setBadges(badgesData.badges || []);
+      } catch (error) {
+        console.error('Failed to fetch profile data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchProfileData();
+  }, [user]);
 
   const weeklyProgress = [
     { day: 'Mon', xp: 45 },
@@ -33,15 +83,6 @@ const StudentProfile = () => {
     { week: 'W2', score: 72 },
     { week: 'W3', score: 78 },
     { week: 'W4', score: 85 },
-  ];
-
-  const badges = [
-    { id: 1, name: 'Fast Learner', icon: '🚀', description: 'Completed 5 lessons in one day', earned: true },
-    { id: 2, name: 'Question Master', icon: '❓', description: 'Asked 10 questions in class', earned: true },
-    { id: 3, name: 'Streak Keeper', icon: '🔥', description: '7 day learning streak', earned: true },
-    { id: 4, name: 'Top Performer', icon: '⭐', description: 'Ranked in top 10%', earned: true },
-    { id: 5, name: 'Perfect Score', icon: '💯', description: 'Scored 100% on a quiz', earned: false },
-    { id: 6, name: 'Team Player', icon: '🤝', description: 'Helped 5 classmates', earned: false },
   ];
 
   return (
@@ -110,6 +151,10 @@ const StudentProfile = () => {
           <div className="max-w-6xl mx-auto">
             <h2 className="text-3xl font-bold mb-8">My Profile</h2>
 
+            {loading && !studentData.points ? (
+              <div className="text-center py-12 text-slate-400">Loading profile...</div>
+            ) : (
+            <>
             {/* Profile Header */}
             <div className="glass-card p-8 mb-8">
               <div className="flex items-start justify-between">
@@ -124,7 +169,7 @@ const StudentProfile = () => {
                       <span className="px-3 py-1 bg-yellow-500/20 text-yellow-400 rounded-full text-sm font-semibold">
                         Level {studentData.level}
                       </span>
-                      <span className="px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-sm font-semibold">
+                      <span className="px-3 py-1 bg-purple-500/20 text-purple-400 rounded-full text-sm font-semibold capitalize">
                         {studentData.rank} Rank
                       </span>
                     </div>
@@ -144,8 +189,8 @@ const StudentProfile = () => {
                   <Target className="text-cyan-400" size={24} />
                   <TrendingUp className="text-green-400" size={20} />
                 </div>
-                <p className="text-2xl font-bold">{studentData.completedLessons}/{studentData.totalLessons}</p>
-                <p className="text-sm text-slate-400">Lessons Completed</p>
+                <p className="text-2xl font-bold">{questionStats.total_answered}</p>
+                <p className="text-sm text-slate-400">Questions Answered</p>
               </div>
 
               <div className="glass-card p-6">
@@ -162,8 +207,8 @@ const StudentProfile = () => {
                   <Trophy className="text-yellow-400" size={24} />
                   <span className="text-xs text-green-400">Top 15%</span>
                 </div>
-                <p className="text-2xl font-bold">{studentData.participationScore}%</p>
-                <p className="text-sm text-slate-400">Participation Score</p>
+                <p className="text-2xl font-bold">{questionStats.total_correct}</p>
+                <p className="text-sm text-slate-400">Correct Answers</p>
               </div>
             </div>
 
@@ -203,26 +248,28 @@ const StudentProfile = () => {
             {/* Badges */}
             <div className="glass-card p-8">
               <h3 className="text-2xl font-bold mb-6">Badges & Achievements</h3>
+              {loading ? (
+                <div className="text-center py-8 text-slate-400">Loading badges...</div>
+              ) : badges.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">No badges earned yet. Keep learning to unlock badges!</div>
+              ) : (
               <div className="grid grid-cols-3 gap-4">
-                {badges.map((badge) => (
+                {badges.map((badge, index) => (
                   <div
-                    key={badge.id}
-                    className={`p-4 rounded-xl border-2 transition-all ${
-                      badge.earned
-                        ? 'bg-yellow-500/10 border-yellow-500/50'
-                        : 'bg-slate-800/30 border-slate-700 opacity-50'
-                    }`}
+                    key={badge.badge_id || badge.student_badge_id || index}
+                    className="p-4 rounded-xl border-2 transition-all bg-yellow-500/10 border-yellow-500/50"
                   >
-                    <div className="text-4xl mb-2">{badge.icon}</div>
-                    <h4 className="font-bold text-sm mb-1">{badge.name}</h4>
-                    <p className="text-xs text-slate-400">{badge.description}</p>
-                    {badge.earned && (
-                      <div className="mt-2 text-xs text-yellow-400 font-semibold">✓ Earned</div>
-                    )}
+                    <div className="text-4xl mb-2">{badge.icon_name || '🏆'}</div>
+                    <h4 className="font-bold text-sm mb-1">{badge.badge_name || badge.name || 'Badge'}</h4>
+                    <p className="text-xs text-slate-400">{badge.description || 'Achievement unlocked!'}</p>
+                    <div className="mt-2 text-xs text-yellow-400 font-semibold">✓ Earned</div>
                   </div>
                 ))}
               </div>
+              )}
             </div>
+            </>
+            )}
           </div>
         </div>
       </div>

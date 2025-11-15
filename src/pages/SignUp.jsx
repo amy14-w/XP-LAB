@@ -6,29 +6,40 @@ import { GraduationCap, User } from 'lucide-react';
 
 const SignUp = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { register } = useAuth();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     role: 'student',
   });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setLoading(true);
     
-    const userData = {
-      id: formData.role === 'professor' ? 'prof-1' : 'student-1',
-      name: formData.name,
-      email: formData.email,
-    };
-    
-    login(userData, formData.role);
-    
-    if (formData.role === 'professor') {
-      navigate('/professor/dashboard');
-    } else {
-      navigate('/student/dashboard');
+    try {
+      const result = await register(formData.email, formData.password, formData.role);
+      
+      if (result.success) {
+        // Navigate based on actual role from backend
+        const userRole = result.role || formData.role;
+        if (userRole === 'professor') {
+          navigate('/professor/dashboard');
+        } else {
+          navigate('/student/dashboard');
+        }
+      } else {
+        setError(result.error || 'Registration failed. Please try again.');
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+      console.error('Registration error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -118,11 +129,18 @@ const SignUp = () => {
               </div>
             </div>
 
+            {error && (
+              <div className="bg-red-500/20 border border-red-500 text-red-300 px-4 py-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
             <button
               type="submit"
-              className="w-full btn-accent py-3 mt-6"
+              disabled={loading}
+              className="w-full btn-accent py-3 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Create Account
+              {loading ? 'Creating account...' : 'Create Account'}
             </button>
           </form>
 

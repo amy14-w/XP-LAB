@@ -11,22 +11,33 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('student');
 
-  const handleSubmit = (e) => {
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setLoading(true);
     
-    // Mock login
-    const userData = {
-      id: role === 'professor' ? 'prof-1' : 'student-1',
-      name: role === 'professor' ? 'Dr. Smith' : 'Alex Johnson',
-      email: email,
-    };
-    
-    login(userData, role);
-    
-    if (role === 'professor') {
-      navigate('/professor/dashboard');
-    } else {
-      navigate('/student/dashboard');
+    try {
+      const result = await login(email, password);
+      
+      if (result.success) {
+        // Navigate based on actual role from backend
+        const userRole = result.role || role;
+        if (userRole === 'professor') {
+          navigate('/professor/dashboard');
+        } else {
+          navigate('/student/dashboard');
+        }
+      } else {
+        setError(result.error || 'Login failed. Please check your credentials.');
+      }
+    } catch (err) {
+      setError('An error occurred. Please try again.');
+      console.error('Login error:', err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -104,11 +115,18 @@ const Login = () => {
               </div>
             </div>
 
+            {error && (
+              <div className="bg-red-500/20 border border-red-500 text-red-300 px-4 py-3 rounded-lg text-sm">
+                {error}
+              </div>
+            )}
+
             <button
               type="submit"
-              className="w-full btn-accent py-3 mt-6"
+              disabled={loading}
+              className="w-full btn-accent py-3 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Login
+              {loading ? 'Logging in...' : 'Login'}
             </button>
           </form>
 
