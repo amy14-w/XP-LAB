@@ -5,7 +5,15 @@ from typing import Dict, List, Optional
 
 
 async def check_quiz_badges(student_id: str, lecture_id: str, question_id: str, is_correct: bool, response_time_ms: Optional[int] = None):
-    """Check and award quiz badges after a student answers a question."""
+    """Check and award quiz badges after a student answers a question.
+    
+    Question Badges:
+    - Hot Streak: 3 correct answers in a row
+    - Fastest Answerer: First person to answer correctly
+    - Cold Badge: 3 wrong answers in a row
+    - Perfect Score: 100% correct in the lecture
+    - Top 3 Badge: Finish in top 3 for the lecture (awarded at end)
+    """
     badges_awarded = []
     
     # Track this answer in quiz_sessions
@@ -28,16 +36,23 @@ async def check_quiz_badges(student_id: str, lecture_id: str, question_id: str, 
     
     answers = list(reversed(recent_answers.data))  # Oldest to newest
     
-    # 1. Check for Fastest Answerer (answered first - lowest response time)
-    if response_time_ms is not None:
-        # Get all answers for this question, ordered by response time
-        all_answers = supabase.table("quiz_sessions").select("*").eq("question_id", question_id).not_.is_("response_time_ms", "null").order("response_time_ms", asc=True).limit(1).execute()
+    # 1. Check for Fastest Answerer (first person to answer correctly)
+    if is_correct and response_time_ms is not None:
+        # Get all correct answers for this question, ordered by response time
+        all_answers = supabase.table("quiz_sessions").select("*").eq(
+            "question_id", question_id
+        ).eq(
+            "is_correct", True
+        ).not_.is_(
+            "response_time_ms", "null"
+        ).order("response_time_ms", asc=True).limit(1).execute()
+        
         if all_answers.data and all_answers.data[0]["student_id"] == student_id:
             badge = await award_badge(student_id, "fastest_answerer", lecture_id=lecture_id, is_temporary=True)
             if badge:
                 badges_awarded.append(badge)
     
-    # 2. Check for Hot Streak (3+ correct in a row)
+    # 2. Check for Hot Streak (3 correct in a row)
     if len(answers) >= 3:
         last_3 = answers[-3:]
         if all(a["is_correct"] for a in last_3):
@@ -62,6 +77,61 @@ async def check_quiz_badges(student_id: str, lecture_id: str, question_id: str, 
             badge = await award_badge(student_id, "perfect_score", lecture_id=lecture_id, is_temporary=True)
             if badge:
                 badges_awarded.append(badge)
+    
+    return badges_awarded
+
+
+async def award_top_3_badges(lecture_id: str):
+    """Award Top 3 badges to highest scorers in a lecture.
+    
+    Called at the end of a lecture session.
+    """
+    # Get all students' scores for this lecture
+    quiz_sessions = supabase.table("quiz_sessions").select("*").eq("lecture_id", lecture_id).execute()
+    
+    if not quiz_sessions.data:
+        return []
+    
+    # Calculate scores per student
+    student_scores = {}
+    for session in quiz_sessions.data:
+        student_id = session["student_id"]
+        if student_id not in student_scores:
+            student_scores[student_id] = {"correct": 0, "total": 0}
+        
+        student_scores[student_id]["total"] += 1
+        if session["is_correct"]:
+            student_scores[student_id]["correct"] += 1
+    
+    # Calculate percentages and sort
+    rankings = []
+    for student_id, scores in student_scores.items():
+        percentage = (scores["correct"] / scores["total"]) * 100 if scores["total"] > 0 else 0
+        rankings.append({
+            "student_id": student_id,
+            "percentage": percentage,
+            "correct": scores["correct"],
+            "total": scores["total"]
+        })
+    
+    # Sort by percentage (desc), then by total correct (desc)
+    rankings.sort(key=lambda x: (x["percentage"], x["correct"]), reverse=True)
+    
+    # Award badges to top 3
+    badges_awarded = []
+    badge_types = ["top_1", "top_2", "top_3"]
+    
+    for i, ranking in enumerate(rankings[:3]):
+        badge = await award_badge(
+            ranking["student_id"],
+            badge_types[i],
+            lecture_id=lecture_id,
+            is_temporary=True
+        )
+        if badge:
+            badge["rank"] = i + 1
+            badge["percentage"] = ranking["percentage"]
+            badges_awarded.append(badge)
     
     return badges_awarded
 

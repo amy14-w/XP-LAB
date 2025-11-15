@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Trophy, Users, UserCircle, Play, Flame, Award, TrendingUp, Target } from 'lucide-react';
+import { BookOpen, Trophy, UserCircle, Flame, Award, TrendingUp, Target, LogOut, MoreHorizontal } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { studentsAPI } from '../../services/api';
 
 const StudentProfile = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [studentData, setStudentData] = useState({
     name: 'Student',
     email: '',
@@ -106,6 +106,13 @@ const StudentProfile = () => {
               <Award className="text-yellow-500" size={24} />
               <span className="text-xl font-semibold">{studentData.rank}</span>
             </div>
+            <button
+              onClick={logout}
+              className="text-slate-400 hover:text-white transition-colors p-2"
+              title="Logout"
+            >
+              <LogOut size={20} />
+            </button>
           </div>
         </div>
       </div>
@@ -128,10 +135,6 @@ const StudentProfile = () => {
               <Trophy size={20} />
               <span>LEADERBOARD</span>
             </button>
-            <button className="nav-item w-full">
-              <Users size={20} />
-              <span>STUDENTS</span>
-            </button>
             <button
               onClick={() => navigate('/student/profile')}
               className="nav-item nav-item-active w-full"
@@ -140,7 +143,7 @@ const StudentProfile = () => {
               <span>PROFILE</span>
             </button>
             <button className="nav-item w-full">
-              <Play size={20} />
+              <MoreHorizontal size={20} />
               <span>MORE</span>
             </button>
           </nav>

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { BookOpen, Users, BarChart3, TrendingUp, Clock, MessageCircle, AlertCircle, CheckCircle } from 'lucide-react';
+import { BookOpen, Users, BarChart3, TrendingUp, Clock, MessageCircle, AlertCircle, CheckCircle, MoreHorizontal } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 const Analytics = () => {
@@ -114,9 +114,16 @@ const Analytics = () => {
               <BarChart3 size={20} />
               <span>ANALYTICS</span>
             </button>
-            <button className="nav-item w-full">
+            <button
+              onClick={() => navigate('/professor/students')}
+              className="nav-item w-full"
+            >
               <Users size={20} />
               <span>STUDENTS</span>
+            </button>
+            <button className="nav-item w-full">
+              <MoreHorizontal size={20} />
+              <span>MORE</span>
             </button>
           </nav>
         </div>

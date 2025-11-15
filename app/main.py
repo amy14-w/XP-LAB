@@ -1,9 +1,12 @@
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth, classes, lectures, questions, attendance, participation, students, analytics
+from app.routes import (
+    auth, classes, lectures, questions, attendance, participation, 
+    students, analytics, streaks, engagement, settings
+)
 from app.websockets.audio_handler import audio_websocket_handler
 
-app = FastAPI(title="ClassLens API", version="1.0.0")
+app = FastAPI(title="XP Lab API", version="2.0.0")
 
 # CORS middleware
 app.add_middleware(
@@ -23,11 +26,26 @@ app.include_router(attendance.router, prefix="/attendance", tags=["Attendance"])
 app.include_router(participation.router, prefix="/participation", tags=["Participation"])
 app.include_router(students.router, prefix="/students", tags=["Students"])
 app.include_router(analytics.router, prefix="/analytics", tags=["Analytics"])
+app.include_router(streaks.router, prefix="/streaks", tags=["Streaks"])
+app.include_router(engagement.router, prefix="/engagement", tags=["Engagement"])
+app.include_router(settings.router, prefix="/settings", tags=["Teacher Settings"])
 
 
 @app.get("/")
 async def root():
-    return {"message": "ClassLens API", "status": "running"}
+    return {
+        "message": "XP Lab API", 
+        "status": "running",
+        "version": "2.0.0",
+        "features": [
+            "Advanced ranking system (6 tiers)",
+            "Streak multipliers and savers",
+            "Question badges system",
+            "Course-specific streak badges",
+            "Engagement analytics",
+            "Teacher custom settings"
+        ]
+    }
 
 
 @app.websocket("/audio/stream/{lecture_id}")

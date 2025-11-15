@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Trophy, Users, UserCircle, Play, Flame, Award, Medal, Crown } from 'lucide-react';
+import { BookOpen, Trophy, Users, UserCircle, MoreHorizontal, Flame, Award, Medal, Crown, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { studentsAPI } from '../../services/api';
 
 const Leaderboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [leaderboardData, setLeaderboardData] = useState([]);
   const [currentUser, setCurrentUser] = useState({ rank: 0 });
   const [loading, setLoading] = useState(true);
@@ -63,11 +63,14 @@ const Leaderboard = () => {
   ];
 
   const getRankColor = (rank) => {
-    switch (rank) {
-      case 'Platinum': return 'from-gray-300 to-gray-400';
-      case 'Gold': return 'from-yellow-400 to-yellow-600';
-      case 'Silver': return 'from-gray-400 to-gray-500';
-      case 'Bronze': return 'from-orange-700 to-orange-900';
+    const rankLower = typeof rank === 'string' ? rank.toLowerCase() : rank;
+    switch (rankLower) {
+      case 'master': return 'from-purple-500 to-purple-700';
+      case 'diamond': return 'from-cyan-300 to-blue-400';
+      case 'platinum': return 'from-gray-300 to-gray-400';
+      case 'gold': return 'from-yellow-400 to-yellow-600';
+      case 'silver': return 'from-gray-400 to-gray-500';
+      case 'bronze': return 'from-orange-700 to-orange-900';
       default: return 'from-slate-500 to-slate-600';
     }
   };
@@ -102,6 +105,13 @@ const Leaderboard = () => {
               <Award className="text-yellow-500" size={24} />
               <span className="text-xl font-semibold">Bronze</span>
             </div>
+            <button
+              onClick={logout}
+              className="p-2 hover:bg-slate-700/50 rounded-lg transition-colors"
+              title="Logout"
+            >
+              <LogOut size={24} className="text-slate-400 hover:text-white" />
+            </button>
           </div>
         </div>
       </div>
@@ -124,10 +134,6 @@ const Leaderboard = () => {
               <Trophy size={20} />
               <span>LEADERBOARD</span>
             </button>
-            <button className="nav-item w-full">
-              <Users size={20} />
-              <span>STUDENTS</span>
-            </button>
             <button
               onClick={() => navigate('/student/profile')}
               className="nav-item w-full"
@@ -136,7 +142,7 @@ const Leaderboard = () => {
               <span>PROFILE</span>
             </button>
             <button className="nav-item w-full">
-              <Play size={20} />
+              <MoreHorizontal size={20} />
               <span>MORE</span>
             </button>
           </nav>
@@ -207,76 +213,185 @@ const Leaderboard = () => {
             </div>
             )}
 
-            {/* Full Leaderboard */}
+            {/* Full Leaderboard - Class Tracker: Top 5 + Current User Position */}
             <div className="glass-card p-6">
-              <h3 className="text-xl font-bold mb-4">Full Rankings</h3>
-              <div className="space-y-2">
-                {leaderboardData.map((student, index) => {
-                      const isCurrentUser = student.id === user?.user_id;
-                  return (
-                    <div
-                      key={student.id}
-                      className={`flex items-center justify-between p-4 rounded-lg transition-all ${
-                        isCurrentUser
-                          ? 'bg-cyan-500/20 border-2 border-cyan-500'
-                          : 'bg-slate-800/30 hover:bg-slate-700/30'
-                      }`}
-                    >
-                      <div className="flex items-center gap-4 flex-1">
-                        <div className="w-12 text-center">
-                          {index < 3 ? (
-                            getPositionIcon(index + 1)
-                          ) : (
-                            <span className="text-xl font-bold text-slate-400">#{index + 1}</span>
-                          )}
+              <h3 className="text-xl font-bold mb-4">Class Tracker</h3>
+              
+              {/* Top 5 Students */}
+              <div className="mb-6">
+                <h4 className="text-sm font-semibold text-slate-400 uppercase mb-3">Top 5</h4>
+                <div className="space-y-2">
+                  {leaderboardData.slice(0, 5).map((student, index) => {
+                    const isCurrentUser = student.id === user?.user_id;
+                    return (
+                      <div
+                        key={student.id}
+                        className={`flex items-center justify-between p-4 rounded-lg transition-all ${
+                          isCurrentUser
+                            ? 'bg-cyan-500/20 border-2 border-cyan-500'
+                            : 'bg-slate-800/30 hover:bg-slate-700/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-4 flex-1">
+                          <div className="w-12 text-center">
+                            {index < 3 ? (
+                              getPositionIcon(index + 1)
+                            ) : (
+                              <span className="text-xl font-bold text-slate-400">#{index + 1}</span>
+                            )}
+                          </div>
+                          <div className={`w-12 h-12 bg-gradient-to-br ${getRankColor(student.rank)} rounded-full flex items-center justify-center font-bold`}>
+                            {student.avatar}
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-bold">
+                              {student.name}
+                              {isCurrentUser && <span className="ml-2 text-cyan-400">(You)</span>}
+                            </h4>
+                            <p className="text-sm text-slate-400 capitalize">{student.rank}</p>
+                          </div>
                         </div>
-                        <div className={`w-12 h-12 bg-gradient-to-br ${getRankColor(student.rank)} rounded-full flex items-center justify-center font-bold`}>
-                          {student.avatar}
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-bold">{student.name}</h4>
-                          <p className="text-sm text-slate-400">{student.rank}</p>
+                        <div className="flex items-center gap-8">
+                          <div className="flex items-center gap-2">
+                            <Flame className="text-orange-400" size={20} />
+                            <span className="font-semibold">{student.streak}</span>
+                          </div>
+                          <div className="text-right min-w-[100px]">
+                            <p className="text-2xl font-bold text-cyan-400">{student.points}</p>
+                            <p className="text-xs text-slate-400">XP</p>
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-8">
-                        <div className="flex items-center gap-2">
-                          <Flame className="text-orange-400" size={20} />
-                          <span className="font-semibold">{student.streak}</span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Current User Position (if not in top 5) */}
+              {currentUser.rank > 5 && leaderboardData[currentUser.rank - 1] && (
+                <div className="border-t border-slate-700 pt-4">
+                  <h4 className="text-sm font-semibold text-slate-400 uppercase mb-3">Your Position</h4>
+                  {(() => {
+                    const student = leaderboardData[currentUser.rank - 1];
+                    return (
+                      <div className="flex items-center justify-between p-4 rounded-lg bg-cyan-500/20 border-2 border-cyan-500">
+                        <div className="flex items-center gap-4 flex-1">
+                          <div className="w-12 text-center">
+                            <span className="text-xl font-bold text-cyan-400">#{currentUser.rank}</span>
+                          </div>
+                          <div className={`w-12 h-12 bg-gradient-to-br ${getRankColor(student.rank)} rounded-full flex items-center justify-center font-bold`}>
+                            {student.avatar}
+                          </div>
+                          <div className="flex-1">
+                            <h4 className="font-bold">
+                              {student.name}
+                              <span className="ml-2 text-cyan-400">(You)</span>
+                            </h4>
+                            <p className="text-sm text-slate-400 capitalize">{student.rank}</p>
+                          </div>
                         </div>
-                        <div className="text-right min-w-[100px]">
-                          <p className="text-2xl font-bold text-cyan-400">{student.points}</p>
-                          <p className="text-xs text-slate-400">XP</p>
+                        <div className="flex items-center gap-8">
+                          <div className="flex items-center gap-2">
+                            <Flame className="text-orange-400" size={20} />
+                            <span className="font-semibold">{student.streak}</span>
+                          </div>
+                          <div className="text-right min-w-[100px]">
+                            <p className="text-2xl font-bold text-cyan-400">{student.points}</p>
+                            <p className="text-xs text-slate-400">XP</p>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })()}
+                  <p className="text-sm text-slate-400 mt-3 text-center">
+                    {currentUser.rank - 5} {currentUser.rank - 5 === 1 ? 'place' : 'places'} below top 5
+                  </p>
+                </div>
+              )}
+
+              {/* Show full list button */}
+              {leaderboardData.length > 5 && (
+                <button 
+                  className="w-full mt-4 py-3 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg transition-colors text-sm font-medium"
+                  onClick={() => {
+                    // Toggle showing full list
+                    document.getElementById('full-list')?.classList.toggle('hidden');
+                  }}
+                >
+                  View Full Leaderboard ({leaderboardData.length} students)
+                </button>
+              )}
+              
+              {/* Full list (hidden by default) */}
+              <div id="full-list" className="hidden mt-6 border-t border-slate-700 pt-6">
+                <h4 className="text-sm font-semibold text-slate-400 uppercase mb-3">Full Rankings</h4>
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {leaderboardData.map((student, index) => {
+                    const isCurrentUser = student.id === user?.user_id;
+                    return (
+                      <div
+                        key={student.id}
+                        className={`flex items-center justify-between p-3 rounded-lg transition-all ${
+                          isCurrentUser
+                            ? 'bg-cyan-500/20 border border-cyan-500'
+                            : 'bg-slate-800/20 hover:bg-slate-700/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 flex-1">
+                          <span className="text-sm font-bold text-slate-400 w-8">#{index + 1}</span>
+                          <div className={`w-10 h-10 bg-gradient-to-br ${getRankColor(student.rank)} rounded-full flex items-center justify-center text-sm font-bold`}>
+                            {student.avatar}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-semibold text-sm">
+                              {student.name}
+                              {isCurrentUser && <span className="ml-2 text-cyan-400 text-xs">(You)</span>}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="font-bold text-cyan-400">{student.points}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Rank Tiers */}
+            {/* Rank Tiers - Updated with 6 tiers */}
             <div className="mt-8 glass-card p-6">
               <h3 className="text-xl font-bold mb-4">Rank Tiers</h3>
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-4">
+                <div className="text-center p-4 bg-gradient-to-br from-purple-500/10 to-purple-700/10 rounded-lg border border-purple-500/30">
+                  <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-purple-500 to-purple-700 rounded-full" />
+                  <p className="font-bold text-sm">Master</p>
+                  <p className="text-xs text-slate-400">1500+ XP</p>
+                </div>
+                <div className="text-center p-4 bg-gradient-to-br from-cyan-300/10 to-blue-400/10 rounded-lg border border-cyan-400/30">
+                  <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-cyan-300 to-blue-400 rounded-full" />
+                  <p className="font-bold text-sm">Diamond</p>
+                  <p className="text-xs text-slate-400">1250-1499</p>
+                </div>
                 <div className="text-center p-4 bg-gradient-to-br from-gray-300/10 to-gray-400/10 rounded-lg border border-gray-400/30">
                   <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-gray-300 to-gray-400 rounded-full" />
-                  <p className="font-bold">Platinum</p>
-                  <p className="text-xs text-slate-400">2500+ XP</p>
+                  <p className="font-bold text-sm">Platinum</p>
+                  <p className="text-xs text-slate-400">820-1249</p>
                 </div>
                 <div className="text-center p-4 bg-gradient-to-br from-yellow-400/10 to-yellow-600/10 rounded-lg border border-yellow-500/30">
                   <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full" />
-                  <p className="font-bold">Gold</p>
-                  <p className="text-xs text-slate-400">1500-2499 XP</p>
+                  <p className="font-bold text-sm">Gold</p>
+                  <p className="text-xs text-slate-400">400-819</p>
                 </div>
                 <div className="text-center p-4 bg-gradient-to-br from-gray-400/10 to-gray-500/10 rounded-lg border border-gray-500/30">
                   <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full" />
-                  <p className="font-bold">Silver</p>
-                  <p className="text-xs text-slate-400">800-1499 XP</p>
+                  <p className="font-bold text-sm">Silver</p>
+                  <p className="text-xs text-slate-400">150-399</p>
                 </div>
                 <div className="text-center p-4 bg-gradient-to-br from-orange-700/10 to-orange-900/10 rounded-lg border border-orange-800/30">
                   <div className="w-12 h-12 mx-auto mb-2 bg-gradient-to-br from-orange-700 to-orange-900 rounded-full" />
-                  <p className="font-bold">Bronze</p>
-                  <p className="text-xs text-slate-400">0-799 XP</p>
+                  <p className="font-bold text-sm">Bronze</p>
+                  <p className="text-xs text-slate-400">0-149</p>
                 </div>
               </div>
             </div>

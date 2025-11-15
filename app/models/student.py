@@ -8,6 +8,8 @@ class Rank(str, Enum):
     SILVER = "silver"
     GOLD = "gold"
     PLATINUM = "platinum"
+    DIAMOND = "diamond"
+    MASTER = "master"
 
 
 class StudentProfile(BaseModel):

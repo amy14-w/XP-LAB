@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { authAPI } from '../services/api';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null); // 'professor' or 'student'
   const [loading, setLoading] = useState(true);
@@ -96,6 +98,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     setRole(null);
     authAPI.logout();
+    navigate('/');
   };
 
   return (

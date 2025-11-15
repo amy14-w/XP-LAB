@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Users, BarChart3, Settings, Plus, Play, Clock, LogOut } from 'lucide-react';
+import { BookOpen, Users, BarChart3, Plus, Play, Clock, LogOut, MoreHorizontal } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { classesAPI, lecturesAPI } from '../../services/api';
@@ -62,7 +62,6 @@ const ProfessorDashboard = () => {
           </h1>
           <div className="flex items-center gap-4">
             <span className="text-slate-300">{user?.email?.split('@')[0] || 'Professor'}</span>
-            <Settings className="text-slate-400 cursor-pointer hover:text-white transition-colors" />
             <button
               onClick={logout}
               className="text-slate-400 hover:text-white transition-colors p-2"
@@ -89,9 +88,16 @@ const ProfessorDashboard = () => {
               <BarChart3 size={20} />
               <span>ANALYTICS</span>
             </button>
-            <button className="nav-item w-full">
+            <button
+              onClick={() => navigate('/professor/students')}
+              className="nav-item w-full"
+            >
               <Users size={20} />
               <span>STUDENTS</span>
+            </button>
+            <button className="nav-item w-full">
+              <MoreHorizontal size={20} />
+              <span>MORE</span>
             </button>
           </nav>
         </div>

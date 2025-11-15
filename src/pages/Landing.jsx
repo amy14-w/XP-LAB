@@ -13,14 +13,67 @@ const Landing = () => {
         className="text-center"
       >
         <div className="mb-12">
-          <h1 className="text-6xl font-bold mb-2">
-            <span className="text-slate-300">XP</span>
-            <span className="text-cyan-400">LAB</span>
-          </h1>
-          <p className="text-slate-400 text-lg">AI-Powered Lecture Assistant</p>
+          <motion.h1 
+            className="font-black mb-6"
+            style={{ 
+              fontFamily: "'Orbitron', 'Rajdhani', 'Exo 2', sans-serif", 
+              letterSpacing: '0.05em',
+              fontSize: '144px'
+            }}
+          >
+            <motion.span 
+              className="inline-block text-slate-200"
+              initial={{ x: -100, opacity: 0 }}
+              animate={{ 
+                x: 0,
+                opacity: 1,
+                rotate: [0, -5, 5, -5, 0],
+                scale: [1, 1.1, 0.95, 1.05, 1],
+                y: [0, -10, 0, -5, 0]
+              }}
+              transition={{ 
+                x: { duration: 0.6, delay: 0.2 },
+                opacity: { duration: 0.6, delay: 0.2 },
+                rotate: { duration: 2, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" },
+                scale: { duration: 2, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" },
+                y: { duration: 2, repeat: Infinity, repeatDelay: 3, ease: "easeInOut" }
+              }}
+              whileHover={{ 
+                scale: 1.2,
+                rotate: 360,
+                color: '#e2e8f0',
+                transition: { duration: 0.5 }
+              }}
+            >
+              XP
+            </motion.span>
+            <motion.span 
+              className="text-cyan-400"
+              initial={{ x: 100, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.4 }}
+              whileHover={{ scale: 1.1, color: '#22d3ee' }}
+            >
+              LAB
+            </motion.span>
+          </motion.h1>
+          <motion.p 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.6, delay: 0.6 }}
+            className="text-slate-400 text-xl tracking-wide"
+            style={{ fontFamily: "'Rajdhani', sans-serif" }}
+          >
+            AI-Powered Lecture Assistant
+          </motion.p>
         </div>
 
-        <div className="flex gap-6 justify-center">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.8 }}
+          className="flex gap-6 justify-center"
+        >
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -37,7 +90,7 @@ const Landing = () => {
           >
             Sign Up
           </motion.button>
-        </div>
+        </motion.div>
       </motion.div>
     </div>
   );

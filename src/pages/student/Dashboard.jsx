@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Trophy, Users, UserCircle, Play, Circle, Diamond, Flame, Award } from 'lucide-react';
+import { BookOpen, Trophy, UserCircle, MoreHorizontal, Circle, Diamond, Flame, Award, LogOut } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { studentsAPI } from '../../services/api';
 
 const StudentDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [selectedChapter, setSelectedChapter] = useState(null);
   const [studentData, setStudentData] = useState({
     name: 'Student',
@@ -142,6 +142,13 @@ const StudentDashboard = () => {
             {loading && (
               <div className="text-sm text-slate-400">Loading...</div>
             )}
+            <button
+              onClick={logout}
+              className="text-slate-400 hover:text-white transition-colors p-2"
+              title="Logout"
+            >
+              <LogOut size={20} />
+            </button>
           </div>
         </div>
       </div>
@@ -164,10 +171,6 @@ const StudentDashboard = () => {
               <Trophy size={20} />
               <span>LEADERBOARD</span>
             </button>
-            <button className="nav-item w-full">
-              <Users size={20} />
-              <span>STUDENTS</span>
-            </button>
             <button
               onClick={() => navigate('/student/profile')}
               className="nav-item w-full"
@@ -176,7 +179,7 @@ const StudentDashboard = () => {
               <span>PROFILE</span>
             </button>
             <button className="nav-item w-full">
-              <Play size={20} />
+              <MoreHorizontal size={20} />
               <span>MORE</span>
             </button>
           </nav>
@@ -185,6 +188,30 @@ const StudentDashboard = () => {
         {/* Main Content */}
         <div className="flex-1 overflow-y-auto p-8">
           <div className="max-w-6xl mx-auto">
+            {/* Active Lectures Banner */}
+            <div className="mb-8">
+              <div className="glass-card p-6 border-2 border-cyan-500/50 bg-gradient-to-r from-cyan-500/10 to-purple-500/10">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                      <h3 className="text-xl font-bold text-cyan-400">Live Lecture in Progress</h3>
+                    </div>
+                    <p className="text-slate-300 mb-1">Big O Notation - CSC2720</p>
+                    <p className="text-sm text-slate-400">Join now to earn points and maintain your streak!</p>
+                  </div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => navigate('/student/lecture/1')}
+                    className="px-6 py-3 bg-gradient-to-r from-cyan-500 to-purple-500 text-white font-bold rounded-lg shadow-lg hover:shadow-cyan-500/50 transition-all"
+                  >
+                    Join Lecture →
+                  </motion.button>
+                </div>
+              </div>
+            </div>
+
             {/* Chapters */}
             {chapters.map((chapter) => (
               <div key={chapter.id} className="mb-16">
@@ -277,7 +304,12 @@ const StudentDashboard = () => {
               </button>
               <button
                 onClick={() => {
-                  alert('Lesson would start here!');
+                  // Navigate to live lecture for Big O Notation (lesson 1.1)
+                  if (selectedChapter.id === '1.1') {
+                    navigate('/student/lecture/1');
+                  } else {
+                    alert('Lesson would start here!');
+                  }
                   setSelectedChapter(null);
                 }}
                 className="flex-1 btn-accent"
