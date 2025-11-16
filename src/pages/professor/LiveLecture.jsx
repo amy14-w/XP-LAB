@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { X, Mic, MicOff, Users, Clock, AlertCircle, Lightbulb, CheckCircle, TrendingUp, TrendingDown, Volume2, Wifi, ChevronLeft, ChevronRight, Maximize2, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
-import { lecturesAPI } from '../../services/api';
+import { lecturesAPI, classesAPI } from '../../services/api';
 
 const LiveLecture = () => {
   const navigate = useNavigate();
@@ -59,8 +59,8 @@ const LiveLecture = () => {
   // Sidebar state for mobile responsiveness
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // PowerPoint slides - Binary Search Trees
-  const slides = [
+  // Default slides - Binary Search Trees
+  const defaultSlides = [
     {
       id: 1,
       type: 'title',
@@ -216,6 +216,23 @@ const LiveLecture = () => {
     }
   ];
 
+  // System Level Programming / C slides (used when class name indicates systems)
+  const systemSlides = [
+    { id: 1, type: 'title', title: 'System Level Programming', subtitle: 'C, Processes, Memory, and the OS', content: 'How programs interact with hardware and the operating system' },
+    { id: 2, type: 'content', title: 'Why C for Systems?', points: ['Close to the metal: control over memory and performance','Portable across architectures','Small runtime: kernels, drivers, embedded','Interop layer for many languages'], code: `#include <stdio.h>\nint main(void){\n  printf("Hello, systems!\\n");\n  return 0;\n}` },
+    { id: 3, type: 'content', title: 'Memory Model (Stack vs Heap)', points: ['Stack: function frames, fast LIFO','Heap: malloc/free for dynamic lifetime','Pointers reference addresses','Beware leaks, dangling, double free'], code: `int *make_array(int n){\n  int *p=(int*)malloc(n*sizeof(int));\n  if(!p) return NULL; /* ... */\n  return p; /* caller must free */\n}` },
+    { id: 4, type: 'content', title: 'Pointers & Arrays', points: ['Arrays decay to pointer to first element','Pointer arithmetic uses element size','Use const to document immutability'], code: `void fill(int *a,int n){\n  for(int i=0;i<n;i++) a[i]=i;\n}` },
+    { id: 5, type: 'content', title: 'Compilation Pipeline', points: ['Preprocess → Compile → Assemble → Link','Toolchain: gcc/clang + as + ld','-O0..-O3 for optimization, -g for debug'], code: `gcc -Wall -Wextra -O2 main.c -o app\n# or stepwise\ngcc -c main.c -o main.o\ngcc main.o -o app` },
+    { id: 6, type: 'content', title: 'Processes & Syscalls', points: ['Process: address space, registers, FDs','Syscalls: execve, fork, wait, read, write','FDs reference open files/pipes/sockets'], code: `#include <unistd.h>\n#include <sys/wait.h>\nint main(){\n  pid_t pid=fork();\n  if(pid==0){ execlp(\"ls\",\"ls\",\"-l\",NULL); }\n  else { wait(NULL); }\n  return 0;\n}` },
+    { id: 7, type: 'content', title: 'File I/O', points: ['POSIX: open/read/write/close (fd)','stdio: fopen/fread/fwrite/fclose (FILE*)','Check return values for short IO/errors'], code: `#include <fcntl.h>\n#include <unistd.h>\nint fd=open(\"data.bin\",O_RDONLY);\nchar buf[1024];\nssize_t n=read(fd,buf,sizeof buf);\nclose(fd);` },
+    { id: 8, type: 'quiz', question: 'Which region stores local variables by default?', options: ['Heap','Stack','BSS','Global segment'], correctAnswer: 1, explanation: 'Automatic (local) variables live on the stack.' },
+    { id: 9, type: 'quiz', question: 'Which call replaces the current process image with a new program?', options: ['fork()','wait()','execve()','clone()'], correctAnswer: 2, explanation: 'execve() overlays current process image; fork() creates a child copy.' },
+    { id: 10, type: 'content', title: 'Safety Tips', points: ['Initialize pointers; set NULL after free()','Prefer size_t for sizes/indices; validate inputs','Use ASan/UBSan, valgrind, static analyzers'] }
+  ];
+
+  // Slides state (switch based on course)
+  const [slides, setSlides] = useState(defaultSlides);
+
   // Fetch attendance data
   useEffect(() => {
     const fetchAttendance = async () => {
@@ -237,6 +254,28 @@ const LiveLecture = () => {
     const interval = setInterval(fetchAttendance, 10000);
     
     return () => clearInterval(interval);
+  }, [lectureId]);
+
+  // Choose slide deck based on class name ("System Level Programming" → systemSlides)
+  useEffect(() => {
+    const chooseSlides = async () => {
+      try {
+        if (!lectureId) return;
+        const lecture = await lecturesAPI.getById(lectureId);
+        const classId = lecture?.class_id;
+        if (!classId) return;
+        const cls = await classesAPI.getById(classId);
+        const name = (cls?.name || '').toLowerCase();
+        if (name.includes('system')) {
+          setSlides(systemSlides);
+        } else if (name.includes('data structure')) {
+          setSlides(defaultSlides);
+        }
+      } catch (e) {
+        // keep default slides on failure
+      }
+    };
+    chooseSlides();
   }, [lectureId]);
 
   useEffect(() => {
@@ -586,8 +625,12 @@ const LiveLecture = () => {
       wsRef.current.close();
     }
     
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {
+        // Ignore if already closed
+      }
     }
     
     setIsRecording(false);

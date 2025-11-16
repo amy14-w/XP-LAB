@@ -10,14 +10,43 @@ const Leaderboard = () => {
   const [leaderboardData, setLeaderboardData] = useState([]);
   const [currentUser, setCurrentUser] = useState({ rank: 0 });
   const [loading, setLoading] = useState(true);
+  const [classes, setClasses] = useState([]);
+  const [selectedClass, setSelectedClass] = useState(null);
+  const [classesLoading, setClassesLoading] = useState(true);
 
+  // Fetch classes student has attended
   useEffect(() => {
-    const fetchLeaderboard = async () => {
+    const fetchClasses = async () => {
       if (!user?.user_id) return;
       
       try {
+        setClassesLoading(true);
+        const studentClasses = await studentsAPI.getStudentClasses(user.user_id);
+        setClasses(studentClasses || []);
+        
+        // Auto-select first class if available
+        if (studentClasses && studentClasses.length > 0) {
+          setSelectedClass(studentClasses[0].class_id);
+        }
+      } catch (error) {
+        console.error('Failed to fetch classes:', error);
+        setClasses([]);
+      } finally {
+        setClassesLoading(false);
+      }
+    };
+    
+    fetchClasses();
+  }, [user]);
+
+  // Fetch leaderboard when class is selected
+  useEffect(() => {
+    const fetchLeaderboard = async () => {
+      if (!user?.user_id || !selectedClass) return;
+      
+      try {
         setLoading(true);
-        const leaderboard = await studentsAPI.getLeaderboard(null, user.user_id);
+        const leaderboard = await studentsAPI.getLeaderboard(selectedClass, user.user_id);
         
         // Transform backend data to match frontend format
         const transformed = (leaderboard || []).map((student, index) => ({
@@ -38,7 +67,6 @@ const Leaderboard = () => {
         }
       } catch (error) {
         console.error('Failed to fetch leaderboard:', error);
-        // Fallback to empty array
         setLeaderboardData([]);
       } finally {
         setLoading(false);
@@ -46,21 +74,7 @@ const Leaderboard = () => {
     };
     
     fetchLeaderboard();
-  }, [user]);
-
-  const leaderboardDataMock = [
-    { id: 1, name: 'Sarah Chen', points: 2850, streak: 21, rank: 'Platinum', avatar: 'SC' },
-    { id: 2, name: 'Mike Thompson', points: 2720, streak: 18, rank: 'Platinum', avatar: 'MT' },
-    { id: 3, name: 'Emily Rodriguez', points: 2590, streak: 15, rank: 'Gold', avatar: 'ER' },
-    { id: 4, name: 'David Park', points: 2340, streak: 12, rank: 'Gold', avatar: 'DP' },
-    { id: 5, name: 'Lisa Wang', points: 2180, streak: 14, rank: 'Gold', avatar: 'LW' },
-    { id: 6, name: 'James Miller', points: 1950, streak: 10, rank: 'Silver', avatar: 'JM' },
-    { id: 7, name: 'Anna Kim', points: 1820, streak: 9, rank: 'Silver', avatar: 'AK' },
-    { id: 8, name: 'Tom Bradley', points: 1690, streak: 8, rank: 'Silver', avatar: 'TB' },
-    { id: 9, name: 'Nina Patel', points: 1540, streak: 7, rank: 'Bronze', avatar: 'NP' },
-    { id: 10, name: 'Chris Lee', points: 1420, streak: 11, rank: 'Bronze', avatar: 'CL' },
-    { id: 15, name: 'Alex Johnson', points: 1250, streak: 7, rank: 'Bronze', avatar: 'AJ' },
-  ];
+  }, [user, selectedClass]);
 
   const getRankColor = (rank) => {
     const rankLower = typeof rank === 'string' ? rank.toLowerCase() : rank;
@@ -156,17 +170,37 @@ const Leaderboard = () => {
                 <Trophy className="text-yellow-400" size={36} />
                 Class Leaderboard
               </h2>
-              <select className="px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white">
-                <option>This Week</option>
-                <option>This Month</option>
-                <option>All Time</option>
-              </select>
+              {classesLoading ? (
+                <div className="text-slate-400">Loading classes...</div>
+              ) : classes.length > 0 ? (
+                <select 
+                  value={selectedClass || ''} 
+                  onChange={(e) => setSelectedClass(e.target.value)}
+                  className="px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                >
+                  {classes.map(cls => (
+                    <option key={cls.class_id} value={cls.class_id}>
+                      {cls.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="text-red-400 text-sm">
+                  You must join a class first to see the leaderboard
+                </div>
+              )}
             </div>
 
-            {loading ? (
+            {!selectedClass && classes.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <Trophy size={48} className="mx-auto mb-4 opacity-50" />
+                <p className="text-lg mb-2">You haven't joined any classes yet.</p>
+                <p className="text-sm">Check into a lecture using a lecture code to join a class and see the leaderboard.</p>
+              </div>
+            ) : loading ? (
               <div className="text-center py-12 text-slate-400">Loading leaderboard...</div>
             ) : leaderboardData.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">No leaderboard data available yet.</div>
+              <div className="text-center py-12 text-slate-400">No leaderboard data available yet for this class.</div>
             ) : (
             <>
             {/* Top 3 Podium */}

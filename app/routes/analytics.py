@@ -1,11 +1,37 @@
 from fastapi import APIRouter, HTTPException, Query
 from app.database import supabase
 from typing import Dict, List
-from datetime import datetime
+from datetime import datetime, timezone
+try:
+    # Python 3.9+
+    from zoneinfo import ZoneInfo
+    EASTERN_TZ = ZoneInfo("America/New_York")
+except Exception:
+    EASTERN_TZ = None
 import os
 
 router = APIRouter()
 
+
+# Module-level datetime parser (used by multiple endpoints)
+def _parse_dt_eastern(dt_str):
+    if not dt_str:
+        return None
+    try:
+        raw = dt_str
+        if isinstance(raw, str) and raw.endswith('Z'):
+            raw = raw.replace('Z', '+00:00')
+        dt = datetime.fromisoformat(raw) if isinstance(raw, str) else raw
+        if dt and dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        try:
+            from zoneinfo import ZoneInfo
+            dt = dt.astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            pass
+        return dt
+    except Exception:
+        return None
 
 @router.get("/lectures/{lecture_id}")
 async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...)):
@@ -44,16 +70,31 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
     end_time = lecture.get("end_time")
     
     # Helper function to parse datetime
-    def parse_datetime(dt_str):
+    def parse_datetime(dt_str, to_eastern: bool = True):
+        """
+        Parse an ISO datetime string to an aware datetime.
+        - Treat 'Z' as UTC.
+        - If no timezone info present, assume UTC.
+        - Optionally convert to US/Eastern for consistent display/processing.
+        """
         if not dt_str:
             return None
         try:
-            # Handle ISO format with 'Z' or '+00:00'
             if isinstance(dt_str, str):
-                if dt_str.endswith('Z'):
-                    dt_str = dt_str.replace('Z', '+00:00')
-                return datetime.fromisoformat(dt_str)
-            return dt_str
+                raw = dt_str
+                # Normalize Z to +00:00
+                if raw.endswith('Z'):
+                    raw = raw.replace('Z', '+00:00')
+                dt = datetime.fromisoformat(raw)
+            else:
+                dt = dt_str
+            # Ensure tz-aware; default to UTC if naive
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            # Convert to Eastern if requested and available
+            if to_eastern and EASTERN_TZ is not None:
+                dt = dt.astimezone(EASTERN_TZ)
+            return dt
         except Exception as e:
             print(f"⚠ Error parsing datetime {dt_str}: {e}")
             return None
@@ -121,14 +162,29 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
                 
                 # Build engagement timeline from sentiment history
                 if sentiment_history:
-                    # Calculate average engagement score from sentiment scores
-                    sentiment_scores = [s.get('sentiment_score', 0.5) for s in sentiment_history if s.get('sentiment_score') is not None]
-                    if sentiment_scores:
-                        # Convert sentiment scores (0-1) to engagement percentage (0-100)
-                        # Positive sentiment (0.5-1.0) maps to 50-100%
-                        # Negative sentiment (0-0.5) maps to 0-50%
-                        engagement_scores = [min(max((score - 0.5) * 200, 0), 100) for score in sentiment_scores]
-                        engagement_score = int(sum(engagement_scores) / len(engagement_scores))
+                    # Confidence gating: only include checkpoints with sufficient confidence (>= 0.5)
+                    filtered = [
+                        s for s in sentiment_history
+                        if s.get('sentiment_score') is not None and s.get('confidence', 1.0) >= 0.5
+                    ]
+                    
+                    # Calculate engagement score using corrected mapping:
+                    # Map sentiment_score from [-1, 1] to engagement [0, 100]
+                    # engagement = ((score + 1) / 2) * 100
+                    if filtered:
+                        mapped_engagement = [
+                            min(max(((s['sentiment_score'] + 1.0) / 2.0) * 100.0, 0.0), 100.0)
+                            for s in filtered
+                        ]
+                        
+                        # Use median aggregation for the headline engagement score for robustness
+                        sorted_vals = sorted(mapped_engagement)
+                        n = len(sorted_vals)
+                        if n % 2 == 1:
+                            median_val = sorted_vals[n // 2]
+                        else:
+                            median_val = (sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2.0
+                        engagement_score = int(round(median_val))
                     
                     # Build timeline data points (every checkpoint, using seconds for granularity)
                     if start_time:
@@ -136,16 +192,17 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
                             start_dt = parse_datetime(start_time)
                             if start_dt:
                                 for sentiment in sentiment_history:
-                                    if 'timestamp' in sentiment:
+                                    # Skip low-confidence points in the timeline as well
+                                    if 'timestamp' in sentiment and sentiment.get('confidence', 1.0) >= 0.5:
                                         try:
                                             sent_time = parse_datetime(sentiment['timestamp'])
                                             if sent_time:
                                                 # Use seconds from start for more granular timeline
                                                 seconds_from_start = int((sent_time - start_dt).total_seconds())
                                                 
-                                                # Calculate engagement from sentiment score
-                                                sent_score = sentiment.get('sentiment_score', 0.5)
-                                                engagement_value = min(max((sent_score - 0.5) * 200, 0), 100)
+                                                # Calculate engagement from sentiment score using corrected mapping
+                                                sent_score = sentiment.get('sentiment_score', 0.0)
+                                                engagement_value = min(max(((sent_score + 1.0) / 2.0) * 100.0, 0.0), 100.0)
                                                 
                                                 engagement_timeline.append({
                                                     "time": str(seconds_from_start),
@@ -157,6 +214,80 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
                         except Exception as e:
                             print(f"⚠ Error parsing start_time: {e}")
                             pass
+                    
+                    # Blend in delivery dynamics from fast metrics (pace, pitch variation, filler)
+                    try:
+                        if lecture_id in voice_pipelines:
+                            fm_history = getattr(voice_pipelines[lecture_id], 'fast_metrics_history', [])
+                            if fm_history and start_time:
+                                start_dt = parse_datetime(start_time)
+                                # Build a quick lookup of delivery scores by second
+                                delivery_by_sec = {}
+                                for m in fm_history:
+                                    ts = m.get('timestamp')
+                                    if not ts or not start_dt:
+                                        continue
+                                    try:
+                                        m_time = parse_datetime(ts)
+                                        sec = int((m_time - start_dt).total_seconds())
+                                        # Compute delivery score 0-100
+                                        # Clarity: inverse of filler_rate
+                                        filler_rate = m.get('filler', {}).get('filler_rate', 0.0)
+                                        clarity = min(max((1.0 - float(filler_rate)) * 100.0, 0.0), 100.0)
+                                        # Pace: same normalization as frontend
+                                        wpm = int(m.get('wpm', {}).get('wpm', 0) or 0)
+                                        if wpm == 0:
+                                            pace = 0.0
+                                        elif wpm < 120:
+                                            pace = (wpm / 120.0) * 70.0
+                                        elif wpm <= 180:
+                                            pace = 70.0 + ((wpm - 120.0) / 60.0) * 30.0
+                                        else:
+                                            pace = max(100.0 - ((wpm - 180.0) / 20.0) * 20.0, 0.0)
+                                        # Pitch variation: inverse of monotone score
+                                        monotone = float(m.get('pitch', {}).get('monotone_score', 1.0))
+                                        pitch = min(max((1.0 - monotone) * 100.0, 0.0), 100.0)
+                                        # Simple average for delivery contribution
+                                        delivery = (clarity + pace + pitch) / 3.0
+                                        delivery_by_sec[sec] = delivery
+                                    except Exception:
+                                        continue
+                                
+                                # Blend sentiment-based engagement with delivery where available
+                                blended = []
+                                for point in engagement_timeline:
+                                    try:
+                                        sec = int(point['time'])
+                                        base = float(point['engagement'])
+                                        # Use nearest delivery within ±10s window
+                                        nearest = None
+                                        best_dt = 999
+                                        for dsec, dval in delivery_by_sec.items():
+                                            dist = abs(dsec - sec)
+                                            if dist < best_dt and dist <= 10:
+                                                best_dt = dist
+                                                nearest = dval
+                                        if nearest is not None:
+                                            val = 0.7 * base + 0.3 * nearest
+                                        else:
+                                            val = base
+                                        blended.append({"time": point["time"], "engagement": round(val, 1)})
+                                    except Exception:
+                                        blended.append(point)
+                                engagement_timeline = blended
+                                
+                                # Apply EMA smoothing to preserve trends but reduce jitter
+                                if engagement_timeline:
+                                    alpha = 0.3
+                                    smoothed = []
+                                    prev = engagement_timeline[0]['engagement']
+                                    for p in engagement_timeline:
+                                        val = alpha * p['engagement'] + (1 - alpha) * prev
+                                        smoothed.append({"time": p["time"], "engagement": round(val, 1)})
+                                        prev = val
+                                    engagement_timeline = smoothed
+                    except Exception as e:
+                        print(f"⚠ Delivery blending error: {e}")
     except Exception as e:
         print(f"⚠ Could not get sentiment history from pipeline: {e}")
         import traceback
@@ -286,33 +417,124 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
     # Get AI feedback history
     feedback_result = supabase.table("ai_feedback").select("*").eq("lecture_id", lecture_id).order("timestamp").execute()
     feedback_history = feedback_result.data if feedback_result.data else []
-    
+
+    # Snapshot (or update) a lecture report so it appears in the Reports list even if end_lecture missed it
     try:
-        return {
+        exists = supabase.table("lecture_reports").select("lecture_id").eq("lecture_id", lecture_id).execute()
+        payload = {
             "lecture_id": lecture_id,
+            "professor_id": class_data.get("professor_id"),
             "topic": topic,
-            "date": formatted_date,
+            "date": start_time,
             "duration_minutes": duration_minutes,
-            "duration_formatted": f"{duration_minutes} min",
-            "attendance_count": attendance_count,
-            "total_students": total_students,
-            "engagement_score": engagement_score,
-            "participation_rate": round(participation_rate, 1),
-            "participation_count": participation_count,
-            "total_participation_points": total_participation_points,
-            "talk_time_ratio": {
-                "professor": round(professor_ratio, 0),
-                "students": round(student_ratio, 0)
-            },
-            "talk_time_distribution": talk_time_distribution,
-            "engagement_timeline": engagement_timeline,
-            "total_questions": total_questions,
-            "question_stats": question_stats,
-            "feedback_history": feedback_history
+            "headline_engagement": engagement_score,
+            "talk_time_professor": int(round(professor_ratio, 0)),
+            "talk_time_students": int(round(student_ratio, 0)),
+            "participation_rate": float(round(participation_rate, 1)),
+            "timeline": engagement_timeline,
+            "summary": {
+                "attendance_count": attendance_count,
+                "total_students": total_students,
+                "participation_count": participation_count,
+                "total_questions": total_questions
+            }
         }
+        if exists.data:
+            supabase.table("lecture_reports").update(payload).eq("lecture_id", lecture_id).execute()
+        else:
+            supabase.table("lecture_reports").insert(payload).execute()
     except Exception as e:
-        print(f"❌ Error building analytics response: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error generating analytics: {str(e)}")
+        print(f"⚠ Failed to upsert lecture report snapshot in analytics: {e}")
+    
+    return {
+        "lecture_id": lecture_id,
+        "topic": topic,
+        "date": formatted_date,
+        "duration_minutes": duration_minutes,
+        "duration_formatted": f"{duration_minutes} min",
+        "attendance_count": attendance_count,
+        "total_students": total_students,
+        "engagement_score": engagement_score,
+        "participation_rate": round(participation_rate, 1),
+        "participation_count": participation_count,
+        "total_participation_points": total_participation_points,
+        "talk_time_ratio": {
+            "professor": round(professor_ratio, 0),
+            "students": round(student_ratio, 0)
+        },
+        "talk_time_distribution": talk_time_distribution,
+        "engagement_timeline": engagement_timeline,
+        "total_questions": total_questions,
+        "question_stats": question_stats,
+        "feedback_history": feedback_history
+    }
+
+
+@router.get("/reports")
+async def list_reports(professor_id: str = Query(...)):
+    """List stored lecture analytics reports for a professor."""
+    try:
+        res = supabase.table("lecture_reports").select(
+            "lecture_id, topic, date, duration_minutes, headline_engagement, participation_rate, talk_time_professor, talk_time_students"
+        ).eq("professor_id", professor_id).order("date", desc=True).execute()
+        return res.data if res.data else []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list reports: {e}")
+
+
+@router.get("/reports/{lecture_id}")
+async def get_report(lecture_id: str, professor_id: str = Query(...)):
+    """Fetch a stored lecture analytics report; fallback to on-demand analytics if missing."""
+    try:
+        res = supabase.table("lecture_reports").select("*").eq("lecture_id", lecture_id).execute()
+        if res.data:
+            report = res.data[0]
+            # Normalize date to formatted string
+            try:
+                dt = _parse_dt_eastern(report.get("date"))
+                report["date_formatted"] = dt.strftime("%B %d, %Y") if dt else "N/A"
+            except:
+                report["date_formatted"] = "N/A"
+            return report
+    except Exception as e:
+        print(f"⚠ Failed to fetch stored report: {e}")
+    # Fallback: compute on-demand and persist snapshot so it appears next time
+    analytics = await get_lecture_analytics(lecture_id, professor_id)  # type: ignore
+    try:
+        # Find professor_id via class -> classes table
+        lecture_row = supabase.table("lectures").select("class_id,start_time").eq("lecture_id", lecture_id).execute().data
+        cls = None
+        if lecture_row:
+            class_id = lecture_row[0].get("class_id")
+            if class_id:
+                cls_res = supabase.table("classes").select("professor_id").eq("class_id", class_id).execute()
+                if cls_res.data:
+                    cls = cls_res.data[0]
+        payload = {
+            "lecture_id": lecture_id,
+            "professor_id": (cls or {}).get("professor_id", professor_id),
+            "topic": analytics.get("topic"),
+            "date": lecture_row[0].get("start_time") if lecture_row else None,
+            "duration_minutes": analytics.get("duration_minutes"),
+            "headline_engagement": analytics.get("engagement_score"),
+            "talk_time_professor": analytics.get("talk_time_ratio", {}).get("professor"),
+            "talk_time_students": analytics.get("talk_time_ratio", {}).get("students"),
+            "participation_rate": analytics.get("participation_rate"),
+            "timeline": analytics.get("engagement_timeline", []),
+            "summary": {
+                "attendance_count": analytics.get("attendance_count"),
+                "total_students": analytics.get("total_students"),
+                "participation_count": analytics.get("participation_count"),
+                "total_questions": analytics.get("total_questions")
+            }
+        }
+        exists = supabase.table("lecture_reports").select("lecture_id").eq("lecture_id", lecture_id).execute()
+        if exists.data:
+            supabase.table("lecture_reports").update(payload).eq("lecture_id", lecture_id).execute()
+        else:
+            supabase.table("lecture_reports").insert(payload).execute()
+        print(f"📝 Saved fallback lecture report snapshot for {lecture_id}")
+    except Exception as e:
+        print(f"⚠ Failed to persist fallback report snapshot: {e}")
+    return analytics
 

@@ -28,7 +28,7 @@ class VoicePipelineManager:
     """
     
     def __init__(self, 
-                 sentiment_interval: float = 12.0,  # 12 seconds between sentiment checks
+                 sentiment_interval: float = 8.0,  # 8 seconds between sentiment checks (higher temporal resolution)
                  transcript_buffer_size: int = 1000):  # Max chars in buffer
         """
         Initialize pipeline manager.

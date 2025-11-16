@@ -99,6 +99,12 @@ export const classesAPI = {
       body: JSON.stringify({ name }),
     });
   },
+
+  delete: async (classId, professorId) => {
+    return await apiRequest(`/classes/${classId}?professor_id=${professorId}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Lectures API
@@ -201,6 +207,12 @@ export const attendanceAPI = {
 export const analyticsAPI = {
   getLectureAnalytics: async (lectureId, professorId) => {
     return await apiRequest(`/analytics/lectures/${lectureId}?professor_id=${professorId}`);
+  },
+  listReports: async (professorId) => {
+    return await apiRequest(`/analytics/reports?professor_id=${professorId}`);
+  },
+  getReport: async (lectureId, professorId) => {
+    return await apiRequest(`/analytics/reports/${lectureId}?professor_id=${professorId}`);
   },
 };
 

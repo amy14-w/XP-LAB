@@ -82,7 +82,7 @@ const ProfessorDashboard = () => {
               <span>CLASSES</span>
             </button>
             <button
-              onClick={() => navigate('/professor/analytics')}
+              onClick={() => navigate('/professor/reports')}
               className="nav-item w-full"
             >
               <BarChart3 size={20} />
@@ -95,7 +95,7 @@ const ProfessorDashboard = () => {
               <Users size={20} />
               <span>STUDENTS</span>
             </button>
-            <button className="nav-item w-full">
+            <button onClick={() => navigate('/professor/more')} className="nav-item w-full">
               <MoreHorizontal size={20} />
               <span>MORE</span>
             </button>
@@ -152,7 +152,21 @@ const ProfessorDashboard = () => {
                     <motion.button
                       whileHover={{ scale: 1.05 }}
                       whileTap={{ scale: 0.95 }}
-                      onClick={() => navigate(`/professor/lecture/${cls.class_id}`)}
+                      onClick={async () => {
+                        try {
+                          // Create a new lecture for this class
+                          const newLecture = await lecturesAPI.create(cls.class_id);
+                          
+                          // Start the lecture (generates lecture code and sets status to active)
+                          await lecturesAPI.start(newLecture.lecture_id);
+                          
+                          // Navigate to live lecture page with the actual lecture_id
+                          navigate(`/professor/lecture/${newLecture.lecture_id}`);
+                        } catch (error) {
+                          console.error('Failed to start lecture:', error);
+                          alert('Failed to start lecture. Please try again.');
+                        }
+                      }}
                       className="flex-1 btn-accent flex items-center justify-center gap-2 py-2"
                     >
                       <Play size={18} />

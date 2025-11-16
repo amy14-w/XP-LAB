@@ -79,21 +79,41 @@ async def login(credentials: UserLogin):
             "password": credentials.password,
         })
         
-        if response.user:
-            # Get user role
-            user_data = supabase.table("users").select("*").eq("user_id", response.user.id).execute()
-            role = user_data.data[0]["role"] if user_data.data else "student"
-            
-            return {
-                "access_token": response.session.access_token,
-                "user_id": response.user.id,
-                "email": response.user.email,
-                "role": role
-            }
-        else:
+        if not response.user:
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Check if email confirmation is required (session is None if not confirmed)
+        if not response.session:
+            raise HTTPException(
+                status_code=401, 
+                detail="Email not confirmed. Please check your email to confirm your account before logging in."
+            )
+        
+        # Get user role
+        user_data = supabase.table("users").select("*").eq("user_id", response.user.id).execute()
+        role = user_data.data[0]["role"] if user_data.data else "student"
+        
+        return {
+            "access_token": response.session.access_token,
+            "user_id": response.user.id,
+            "email": response.user.email,
+            "role": role
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions (like the ones above)
+        raise
     except Exception as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        # Handle other errors
+        error_message = str(e)
+        if "Invalid login credentials" in error_message or "invalid" in error_message.lower():
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        elif "email" in error_message.lower() and "confirm" in error_message.lower():
+            raise HTTPException(
+                status_code=401, 
+                detail="Email not confirmed. Please check your email to confirm your account."
+            )
+        else:
+            raise HTTPException(status_code=401, detail=f"Login failed: {error_message}")
 
 
 @router.get("/me")

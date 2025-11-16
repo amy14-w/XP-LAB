@@ -56,6 +56,16 @@ first_chunk_received: Dict[str, bool] = {}  # lecture_id -> whether first chunk 
 # Store PCM metadata for each lecture (from JSON messages, used when binary PCM arrives)
 pcm_metadata_queue: Dict[str, dict] = {}  # lecture_id -> PCM metadata dict
 
+# Lecture lifecycle flags
+lecture_ended: Dict[str, bool] = {}  # lecture_id -> ended flag
+
+def mark_lecture_ended(lec_id: str) -> None:
+    """Mark lecture as ended so the audio loop can exit promptly."""
+    try:
+        lecture_ended[lec_id] = True
+    except Exception:
+        pass
+
 # Settings (matching test_mic_realtime.py)
 SAMPLE_RATE = 22050  # Hz
 CHUNK_DURATION = 2.0  # seconds (from frontend - 2 second chunks)
@@ -429,8 +439,8 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                 if lecture_id not in sentiment_queues:
                     sentiment_queues[lecture_id] = asyncio.Queue()
                 
-                try:
-                    sentiment_queues[lecture_id].put_nowait({
+                # Build payload
+                payload = {
                         "type": "ai_feedback",
                         "feedback": {
                             "sentiment": sentiment.get('sentiment_label', 'neutral'),
@@ -439,9 +449,13 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                             "engagement_indicators": sentiment.get('engagement_indicators', []),
                             "confidence": sentiment.get('confidence', 0.0)
                         }
-                    })
+                }
+                try:
+                    sentiment_queues[lecture_id].put_nowait(payload)
                 except asyncio.QueueFull:
                     pass  # Skip if queue is full
+                
+                # No DB persistence here to avoid impacting live analytics
             except Exception as e:
                 print(f"Error queuing sentiment: {e}")
         
@@ -479,7 +493,22 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
     use_whisper = openai_key is not None
     
     try:
+        # Track last time we received any audio/message to support idle timeout
+        from time import monotonic
+        last_message_time = monotonic()
+        IDLE_TIMEOUT_SECONDS = 20  # stop if no messages for 20s
+        
         while True:
+            # If lecture was explicitly ended (via HTTP endpoint), stop processing
+            if lecture_ended.get(lecture_id, False):
+                print(f"ℹ Lecture {lecture_id} marked ended; stopping audio processing loop.")
+                break
+            
+            # Idle timeout: if we haven't received anything recently, stop
+            if monotonic() - last_message_time > IDLE_TIMEOUT_SECONDS:
+                print(f"ℹ Idle timeout for lecture {lecture_id}; no audio received for {IDLE_TIMEOUT_SECONDS}s. Stopping.")
+                break
+            
             # Check for sentiment messages to send (non-blocking)
             try:
                 # Defensive check: ensure sentiment_queues exists for this lecture
@@ -490,6 +519,10 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                             await websocket.send_json(sentiment_msg)
                         except (ConnectionClosed, ConnectionClosedOK, ConnectionClosedError, WebSocketDisconnect):
                             # Client disconnected; stop processing
+                            raise WebSocketDisconnect()
+                        except RuntimeError as e:
+                            # Starlette raises RuntimeError after close; stop sending immediately
+                            print(f"⚠ WebSocket runtime error while sending sentiment (likely closed): {e}")
                             raise WebSocketDisconnect()
             except asyncio.QueueEmpty:
                 pass
@@ -504,6 +537,8 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
             try:
                 # Try to receive message (could be text or binary)
                 raw_message = await asyncio.wait_for(websocket.receive(), timeout=0.1)
+                # Received something – update activity timestamp
+                last_message_time = monotonic()
                 
                 # Check message type and handle accordingly
                 if "text" in raw_message:
@@ -607,11 +642,14 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                 continue
             except WebSocketDisconnect:
                 break
+            except RuntimeError as e:
+                # Starlette raises RuntimeError after a disconnect frame for any further receive()
+                print(f"⚠ WebSocket runtime error (likely disconnected): {e}")
+                break
             except Exception as e:
+                # Unexpected error while receiving - stop the loop to avoid spamming
                 print(f"⚠ Error receiving message: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
+                break
             
             chunk_count += 1
             current_chunk_idx = chunk_count
@@ -659,6 +697,9 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                         "metrics": frontend_metrics
                     })
                 except (ConnectionClosed, ConnectionClosedOK, ConnectionClosedError, WebSocketDisconnect):
+                    raise WebSocketDisconnect()
+                except RuntimeError as e:
+                    print(f"⚠ WebSocket runtime error while sending metrics (likely closed): {e}")
                     raise WebSocketDisconnect()
             except Exception as e:
                 print(f"Error sending metrics: {e}")
@@ -724,8 +765,13 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                             # We'll add it once per batch, not per chunk, to avoid duplicates
                             if chunk_idx == batch_chunk_indices[lecture_id][0]:  # Only add for first chunk in batch
                                 # Manually add to pipeline's transcript buffer for sentiment analysis
-                                # Get current time for timestamp
-                                current_time = datetime.utcnow()
+                                # Get current time for timestamp (US/Eastern)
+                                try:
+                                    from zoneinfo import ZoneInfo
+                                    current_time = datetime.now(ZoneInfo("America/New_York"))
+                                except Exception:
+                                    from datetime import timezone
+                                    current_time = datetime.now(timezone.utc)
                                 # Calculate total duration for this batch
                                 batch_chunk_count = len(batch_chunk_indices[lecture_id])
                                 batch_total_duration = batch_chunk_count * CHUNK_DURATION
@@ -771,11 +817,17 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                     # Send transcript update to frontend (EXACT same as test_mic_realtime.py behavior)
                     try:
                         try:
+                            from zoneinfo import ZoneInfo
+                            eastern_now = datetime.now(ZoneInfo("America/New_York"))
+                        except Exception:
+                            from datetime import timezone
+                            eastern_now = datetime.now(timezone.utc)
+                        try:
                             await websocket.send_json({
                                 "type": "transcript_update",
                                 "transcript": lecture_transcripts[lecture_id],
                                 "new_segment": batch_transcript,
-                                "timestamp": datetime.utcnow().isoformat()
+                                "timestamp": eastern_now.isoformat()
                             })
                         except (ConnectionClosed, ConnectionClosedOK, ConnectionClosedError, WebSocketDisconnect):
                             raise WebSocketDisconnect()
@@ -839,7 +891,12 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                     # Add transcript to pipeline's buffer for sentiment analysis
                     if batch_transcript and batch_transcript.strip():
                         if chunk_idx == batch_chunk_indices[lecture_id][0]:  # Only add for first chunk in batch
-                            current_time = datetime.utcnow()
+                            try:
+                                from zoneinfo import ZoneInfo
+                                current_time = datetime.now(ZoneInfo("America/New_York"))
+                            except Exception:
+                                from datetime import timezone
+                                current_time = datetime.now(timezone.utc)
                             batch_chunk_count = len(batch_chunk_indices[lecture_id])
                             batch_total_duration = batch_chunk_count * CHUNK_DURATION
                             

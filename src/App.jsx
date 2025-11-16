@@ -7,6 +7,8 @@ import ProfessorDashboard from './pages/professor/Dashboard';
 import ProfessorLecture from './pages/professor/LiveLecture';
 import ProfessorAnalytics from './pages/professor/Analytics';
 import ProfessorStudents from './pages/professor/Students';
+import ProfessorMore from './pages/professor/More';
+import ProfessorReports from './pages/professor/Reports';
 import StudentDashboard from './pages/student/Dashboard';
 import StudentProfile from './pages/student/Profile';
 import StudentLiveLecture from './pages/student/LiveLecture';
@@ -26,6 +28,8 @@ function App() {
           <Route path="/professor/lecture/:lectureId" element={<ProfessorLecture />} />
           <Route path="/professor/analytics/:lectureId?" element={<ProfessorAnalytics />} />
           <Route path="/professor/students" element={<ProfessorStudents />} />
+          <Route path="/professor/more" element={<ProfessorMore />} />
+          <Route path="/professor/reports" element={<ProfessorReports />} />
           
           {/* Student Routes */}
           <Route path="/student/dashboard" element={<StudentDashboard />} />

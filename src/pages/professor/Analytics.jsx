@@ -14,6 +14,12 @@ const Analytics = () => {
   const [error, setError] = useState(null);
 
   useEffect(() => {
+    // If no lectureId is present, treat Analytics as the entry point to reports
+    // and redirect to the Reports listing page.
+    if (!lectureId && user?.user_id) {
+      navigate('/professor/reports');
+      return;
+    }
     const fetchAnalytics = async () => {
       if (!lectureId || !user?.user_id) {
         setError('Missing lecture ID or user information');
@@ -99,12 +105,20 @@ const Analytics = () => {
             <span className="text-slate-300">XP</span>
             <span className="text-cyan-400">LAB</span>
           </h1>
-          <button
-            onClick={() => navigate('/professor/dashboard')}
-            className="btn-primary"
-          >
-            Back to Dashboard
-          </button>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => navigate('/professor/reports')}
+                      className="btn-secondary"
+                    >
+                      View Reports
+                    </button>
+                    <button
+                      onClick={() => navigate('/professor/dashboard')}
+                      className="btn-primary"
+                    >
+                      Back to Dashboard
+                    </button>
+                  </div>
         </div>
       </div>
 
@@ -273,11 +287,15 @@ const Analytics = () => {
                       <Tooltip />
                     </PieChart>
                   </ResponsiveContainer>
-                  <div className="absolute flex flex-col gap-2 ml-8">
-                    {(talk_time_distribution || []).map((entry) => (
+                  <div className="absolute bottom-6 right-6 flex flex-col items-end gap-2 text-lg">
+                    {((talk_time_distribution || []).slice().sort((a, b) => {
+                      if (a.name === 'Professor' && b.name !== 'Professor') return -1;
+                      if (b.name === 'Professor' && a.name !== 'Professor') return 1;
+                      return 0;
+                    })).map((entry) => (
                       <div key={entry.name} className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color || '#06B6D4' }} />
-                        <span className="text-sm">{entry.name}: {entry.value}%</span>
+                        <span>{entry.name}: {entry.value}%</span>
                       </div>
                     ))}
                   </div>
