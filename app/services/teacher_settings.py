@@ -35,6 +35,9 @@ class TeacherSettings(BaseModel):
     
     # Teacher bonus limits
     max_teacher_bonus: int = 50
+    
+    # Question timing (in minutes)
+    question_suggestion_interval: int = 5  # Suggest questions every 5 minutes of talk time
 
 
 async def get_teacher_settings(class_id: str) -> TeacherSettings:

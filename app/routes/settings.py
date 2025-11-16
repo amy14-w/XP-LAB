@@ -34,6 +34,9 @@ class SettingsUpdate(BaseModel):
     
     # Teacher bonus limits
     max_teacher_bonus: Optional[int] = None
+    
+    # Question timing
+    question_suggestion_interval: Optional[int] = None  # Minutes of talk time between suggestions
 
 
 @router.get("/{class_id}")

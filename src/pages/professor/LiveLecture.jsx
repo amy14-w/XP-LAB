@@ -1,19 +1,33 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { X, Mic, MicOff, Users, Clock, AlertCircle, Lightbulb, CheckCircle, TrendingUp, TrendingDown, Volume2, Wifi, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react';
+import { X, Mic, MicOff, Users, Clock, AlertCircle, Lightbulb, CheckCircle, TrendingUp, TrendingDown, Volume2, Wifi, ChevronLeft, ChevronRight, Maximize2, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
+import { lecturesAPI, classesAPI } from '../../services/api';
 
 const LiveLecture = () => {
   const navigate = useNavigate();
   const { lectureId } = useParams();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [aiSuggestions, setAiSuggestions] = useState([]);
+  
+  // Live transcription state
+  const [transcript, setTranscript] = useState('');
+  const [transcriptSegments, setTranscriptSegments] = useState([]); // Array of {text, timestamp}
+  
+  // AI Sentiment & Tone Analysis state
+  const [sentimentData, setSentimentData] = useState({
+    sentiment_score: 0,
+    sentiment_label: 'neutral',
+    confidence: 0,
+    tone_description: '',
+    engagement_indicators: []
+  });
   
   // Microphone & WebSocket state
   const [micPermission, setMicPermission] = useState('pending'); // 'pending', 'granted', 'denied'
@@ -38,20 +52,15 @@ const LiveLecture = () => {
   const wsRef = useRef(null);
   const streamRef = useRef(null);
   const chunksRef = useRef([]);
+  
+  const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  
+  // Sidebar state for mobile responsiveness
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const students = [
-    { id: 1, name: 'Sarah Chen', present: true, participated: 3, lastActive: '2 min ago' },
-    { id: 2, name: 'Mike Thompson', present: true, participated: 1, lastActive: '5 min ago' },
-    { id: 3, name: 'Emily Rodriguez', present: true, participated: 2, lastActive: '1 min ago' },
-    { id: 4, name: 'David Park', present: true, participated: 0, lastActive: 'Never' },
-    { id: 5, name: 'Lisa Wang', present: true, participated: 4, lastActive: '30 sec ago' },
-    { id: 6, name: 'James Miller', present: false, participated: 0, lastActive: 'Absent' },
-    { id: 7, name: 'Anna Kim', present: true, participated: 1, lastActive: '8 min ago' },
-    { id: 8, name: 'Tom Bradley', present: true, participated: 0, lastActive: 'Never' },
-  ];
-
-  // PowerPoint slides - Binary Search Trees
-  const slides = [
+  // Default slides - Binary Search Trees
+  const defaultSlides = [
     {
       id: 1,
       type: 'title',
@@ -207,11 +216,67 @@ const LiveLecture = () => {
     }
   ];
 
-  const mockSuggestions = [
-    { id: 1, type: 'warning', message: "You've been lecturing for 12 minutes straight. Consider asking a question.", icon: AlertCircle, color: 'text-yellow-400' },
-    { id: 2, type: 'tip', message: "Pacing is slightly fast. Students may need time to process.", icon: TrendingDown, color: 'text-blue-400' },
-    { id: 3, type: 'activity', message: "Try a quick example: 'Can someone explain the time complexity?'", icon: Lightbulb, color: 'text-green-400' },
+  // System Level Programming / C slides (used when class name indicates systems)
+  const systemSlides = [
+    { id: 1, type: 'title', title: 'System Level Programming', subtitle: 'C, Processes, Memory, and the OS', content: 'How programs interact with hardware and the operating system' },
+    { id: 2, type: 'content', title: 'Why C for Systems?', points: ['Close to the metal: control over memory and performance','Portable across architectures','Small runtime: kernels, drivers, embedded','Interop layer for many languages'], code: `#include <stdio.h>\nint main(void){\n  printf("Hello, systems!\\n");\n  return 0;\n}` },
+    { id: 3, type: 'content', title: 'Memory Model (Stack vs Heap)', points: ['Stack: function frames, fast LIFO','Heap: malloc/free for dynamic lifetime','Pointers reference addresses','Beware leaks, dangling, double free'], code: `int *make_array(int n){\n  int *p=(int*)malloc(n*sizeof(int));\n  if(!p) return NULL; /* ... */\n  return p; /* caller must free */\n}` },
+    { id: 4, type: 'content', title: 'Pointers & Arrays', points: ['Arrays decay to pointer to first element','Pointer arithmetic uses element size','Use const to document immutability'], code: `void fill(int *a,int n){\n  for(int i=0;i<n;i++) a[i]=i;\n}` },
+    { id: 5, type: 'content', title: 'Compilation Pipeline', points: ['Preprocess → Compile → Assemble → Link','Toolchain: gcc/clang + as + ld','-O0..-O3 for optimization, -g for debug'], code: `gcc -Wall -Wextra -O2 main.c -o app\n# or stepwise\ngcc -c main.c -o main.o\ngcc main.o -o app` },
+    { id: 6, type: 'content', title: 'Processes & Syscalls', points: ['Process: address space, registers, FDs','Syscalls: execve, fork, wait, read, write','FDs reference open files/pipes/sockets'], code: `#include <unistd.h>\n#include <sys/wait.h>\nint main(){\n  pid_t pid=fork();\n  if(pid==0){ execlp(\"ls\",\"ls\",\"-l\",NULL); }\n  else { wait(NULL); }\n  return 0;\n}` },
+    { id: 7, type: 'content', title: 'File I/O', points: ['POSIX: open/read/write/close (fd)','stdio: fopen/fread/fwrite/fclose (FILE*)','Check return values for short IO/errors'], code: `#include <fcntl.h>\n#include <unistd.h>\nint fd=open(\"data.bin\",O_RDONLY);\nchar buf[1024];\nssize_t n=read(fd,buf,sizeof buf);\nclose(fd);` },
+    { id: 8, type: 'quiz', question: 'Which region stores local variables by default?', options: ['Heap','Stack','BSS','Global segment'], correctAnswer: 1, explanation: 'Automatic (local) variables live on the stack.' },
+    { id: 9, type: 'quiz', question: 'Which call replaces the current process image with a new program?', options: ['fork()','wait()','execve()','clone()'], correctAnswer: 2, explanation: 'execve() overlays current process image; fork() creates a child copy.' },
+    { id: 10, type: 'content', title: 'Safety Tips', points: ['Initialize pointers; set NULL after free()','Prefer size_t for sizes/indices; validate inputs','Use ASan/UBSan, valgrind, static analyzers'] }
   ];
+
+  // Slides state (switch based on course)
+  const [slides, setSlides] = useState(defaultSlides);
+
+  // Fetch attendance data
+  useEffect(() => {
+    const fetchAttendance = async () => {
+      if (!lectureId) return;
+      setStudentsLoading(true);
+      try {
+        const data = await lecturesAPI.getAttendance(lectureId);
+        setStudents(data.students || []);
+      } catch (error) {
+        console.error('Failed to fetch attendance:', error);
+        setStudents([]);
+      } finally {
+        setStudentsLoading(false);
+      }
+    };
+    
+    // Fetch initially and then poll every 10 seconds
+    fetchAttendance();
+    const interval = setInterval(fetchAttendance, 10000);
+    
+    return () => clearInterval(interval);
+  }, [lectureId]);
+
+  // Choose slide deck based on class name ("System Level Programming" → systemSlides)
+  useEffect(() => {
+    const chooseSlides = async () => {
+      try {
+        if (!lectureId) return;
+        const lecture = await lecturesAPI.getById(lectureId);
+        const classId = lecture?.class_id;
+        if (!classId) return;
+        const cls = await classesAPI.getById(classId);
+        const name = (cls?.name || '').toLowerCase();
+        if (name.includes('system')) {
+          setSlides(systemSlides);
+        } else if (name.includes('data structure')) {
+          setSlides(defaultSlides);
+        }
+      } catch (e) {
+        // keep default slides on failure
+      }
+    };
+    chooseSlides();
+  }, [lectureId]);
 
   useEffect(() => {
     if (isRecording) {
@@ -281,24 +346,32 @@ const LiveLecture = () => {
       setMicPermission('granted');
       
       // Setup audio context for visualization
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
-      analyserRef.current = audioContextRef.current.createAnalyser();
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      source.connect(analyserRef.current);
-      analyserRef.current.fftSize = 256;
-      
-      // Setup MediaRecorder for 2-second chunks
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-        audioBitsPerSecond: 16000
+      // Setup Web Audio API for real-time PCM streaming (replaces MediaRecorder)
+      // Use 16kHz sample rate (matching Whisper API requirements)
+      const targetSampleRate = 16000;
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: targetSampleRate
       });
       
-      mediaRecorderRef.current = mediaRecorder;
+      // Create media stream source
+      const source = audioContext.createMediaStreamSource(stream);
+      
+      // Keep analyser for visualization
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      audioContextRef.current = audioContext;
       
       // Setup WebSocket connection
-      const professorId = user?.user_id || 'demo-professor';
+      const professorId = user?.user_id;
+      if (!professorId) {
+        alert('You must be logged in to start recording');
+        return;
+      }
       const wsUrl = `ws://localhost:8000/audio/stream/${lectureId}?professor_id=${professorId}`;
       const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer'; // Enable binary data support for PCM
       wsRef.current = ws;
       
       ws.onopen = () => {
@@ -309,23 +382,53 @@ const LiveLecture = () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('📊 Received metrics:', data);
+          console.log('📊 Received WebSocket message:', data);
           
-          // Update voice metrics
-          if (data.metrics) {
-            setVoiceMetrics(data.metrics);
+          // Update voice metrics (from AI assistant backend)
+          if (data.type === 'voice_metrics' && data.metrics) {
+            console.log('✅ Updating voice metrics:', data.metrics);
+            setVoiceMetrics(prev => {
+              // Smooth transition - only update if values changed significantly
+              const newMetrics = { ...data.metrics };
+              // Ensure all values are numbers
+              Object.keys(newMetrics).forEach(key => {
+                newMetrics[key] = typeof newMetrics[key] === 'number' ? newMetrics[key] : parseFloat(newMetrics[key]) || 0;
+              });
+              return newMetrics;
+            });
           }
           
-          // Update AI suggestions
-          if (data.suggestion) {
-            setAiSuggestions(prev => [...prev, {
-              id: Date.now(),
-              type: data.suggestion.type || 'tip',
-              message: data.suggestion.message,
-              icon: data.suggestion.type === 'warning' ? AlertCircle : Lightbulb,
-              color: data.suggestion.type === 'warning' ? 'text-yellow-400' : 'text-blue-400',
-              timestamp: duration
-            }]);
+          // Update live transcription
+          if (data.type === 'transcript_update') {
+            console.log('📝 Received transcript update:', data);
+            if (data.transcript) {
+              setTranscript(data.transcript);
+            }
+            // Add new segment to transcript segments for animation
+            if (data.new_segment) {
+              const newSegment = {
+                text: data.new_segment,
+                timestamp: data.timestamp || new Date().toISOString()
+              };
+              setTranscriptSegments(prev => [...prev, newSegment]);
+              console.log('✅ Added transcript segment:', newSegment);
+            }
+          }
+          
+          // Update AI feedback (sentiment analysis, tone, engagement)
+          if (data.type === 'ai_feedback' && data.feedback) {
+            const feedback = data.feedback;
+            console.log('🤖 Received AI feedback:', feedback);
+            
+            // Update sentiment data state (always update if feedback exists)
+            setSentimentData(prev => ({
+              sentiment_score: feedback.sentiment_score !== undefined ? feedback.sentiment_score : prev.sentiment_score,
+              sentiment_label: feedback.sentiment || prev.sentiment_label || 'neutral',
+              confidence: feedback.confidence !== undefined ? feedback.confidence : prev.confidence,
+              tone_description: feedback.tone || prev.tone_description || '',
+              engagement_indicators: feedback.engagement_indicators || prev.engagement_indicators || []
+            }));
+            console.log('✅ Updated sentiment data state');
           }
         } catch (error) {
           console.error('Error parsing WebSocket message:', error);
@@ -342,28 +445,143 @@ const LiveLecture = () => {
         setIsConnected(false);
       };
       
-      // Handle audio data - send 2-second chunks
-      mediaRecorder.ondataavailable = async (event) => {
-        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          // Convert blob to base64 for sending over WebSocket
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64Audio = reader.result.split(',')[1];
-            ws.send(JSON.stringify({
-              type: 'audio_chunk',
-              data: base64Audio,
-              timestamp: Date.now()
-            }));
-          };
-          reader.readAsDataURL(event.data);
+      // Setup ScriptProcessor for real-time PCM capture (replaces MediaRecorder)
+      // ScriptProcessor is deprecated but widely supported; AudioWorklet is preferred but needs separate file
+      // Buffer size: 4096 samples = ~0.25 seconds at 16kHz (good balance between latency and performance)
+      const bufferSize = 4096;
+      const numberOfChannels = 1; // Mono audio
+      
+      let scriptProcessor = null;
+      
+      // Try to create ScriptProcessor (deprecated but widely supported)
+      try {
+        scriptProcessor = audioContext.createScriptProcessor(bufferSize, numberOfChannels, numberOfChannels);
+      } catch (e) {
+        console.error('❌ ScriptProcessor not supported, falling back to AudioWorklet or alternative');
+        alert('Your browser does not support ScriptProcessor. Please use a modern browser.');
+        return;
+      }
+      
+      // Track chunk count and buffer for batching
+      let chunkCount = 0;
+      let isStillRecording = true;
+      const pcmBuffer = []; // Buffer to accumulate PCM data before sending
+      const bufferDuration = 0.5; // Send PCM chunks every 0.5 seconds (500ms)
+      const bufferSampleCount = Math.floor(targetSampleRate * bufferDuration); // Samples per buffer
+      
+      // Process audio data in real-time
+      scriptProcessor.onaudioprocess = (event) => {
+        if (!isStillRecording || ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        
+        try {
+          // Get PCM data from input buffer (Float32Array, range -1.0 to 1.0)
+          const inputBuffer = event.inputBuffer.getChannelData(0);
+          
+          // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767) for transmission
+          // This is more efficient than sending Float32
+          const int16Buffer = new Int16Array(inputBuffer.length);
+          for (let i = 0; i < inputBuffer.length; i++) {
+            // Clamp to [-1, 1] and convert to Int16
+            const sample = Math.max(-1, Math.min(1, inputBuffer[i]));
+            int16Buffer[i] = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+          }
+          
+          // Accumulate in buffer
+          pcmBuffer.push(...Array.from(int16Buffer));
+          
+          // Send when buffer reaches target duration
+          if (pcmBuffer.length >= bufferSampleCount) {
+            chunkCount++;
+            
+            // Create ArrayBuffer from Int16 array
+            const pcmArray = new Int16Array(pcmBuffer.splice(0, bufferSampleCount));
+            const pcmBytes = pcmArray.buffer;
+            
+            // Send PCM data as binary with metadata
+            // Use ArrayBuffer directly for binary WebSocket transmission (more efficient than base64)
+            // We'll send metadata separately via JSON, then binary data
+            try {
+              // Send metadata first (JSON)
+              ws.send(JSON.stringify({
+                type: 'audio_chunk_pcm',
+                sample_rate: targetSampleRate,
+                samples: pcmArray.length,
+                duration: pcmArray.length / targetSampleRate,
+                timestamp: Date.now(),
+                chunk_index: chunkCount,
+                format: 'pcm_int16'
+              }));
+              
+              // Send PCM binary data (ArrayBuffer)
+              ws.send(pcmBytes);
+              
+              console.log(`✅ Sent PCM chunk #${chunkCount}: ${pcmArray.length} samples (${(pcmArray.length / targetSampleRate).toFixed(2)}s, ${pcmBytes.byteLength} bytes)`);
+            } catch (error) {
+              console.error('❌ Error sending PCM chunk:', error);
+            }
+          }
+        } catch (error) {
+          console.error('❌ Error processing audio:', error);
         }
       };
       
-      // Start recording with 2-second chunks (timeslice)
-      mediaRecorder.start(2000); // 2000ms = 2 seconds
+      // Connect source to script processor (creates audio processing graph)
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination); // Connect to destination to avoid audio routing issues
+      
+      // Store processor reference for cleanup
+      mediaRecorderRef.current = scriptProcessor;
+      
+      // Cleanup function
+      const stopFunction = () => {
+        isStillRecording = false;
+        
+        // Send any remaining buffered PCM data
+        if (pcmBuffer.length > 0 && ws.readyState === WebSocket.OPEN) {
+          try {
+            const remainingPcm = new Int16Array(pcmBuffer);
+            const remainingBytes = remainingPcm.buffer;
+            
+            ws.send(JSON.stringify({
+              type: 'audio_chunk_pcm',
+              sample_rate: targetSampleRate,
+              samples: remainingPcm.length,
+              duration: remainingPcm.length / targetSampleRate,
+              timestamp: Date.now(),
+              chunk_index: chunkCount + 1,
+              format: 'pcm_int16',
+              is_final: true
+            }));
+            
+            ws.send(remainingBytes);
+            pcmBuffer.length = 0; // Clear buffer
+            console.log(`✅ Sent final PCM chunk: ${remainingPcm.length} samples`);
+          } catch (error) {
+            console.error('❌ Error sending final PCM chunk:', error);
+          }
+        }
+        
+        // Disconnect audio nodes
+        if (scriptProcessor) {
+          try {
+            scriptProcessor.disconnect();
+          } catch (e) {
+            // Ignore disconnect errors
+          }
+        }
+      };
+      
+      // Store stop function reference for cleanup
+      if (!window.recordingStopFunctions) {
+        window.recordingStopFunctions = {};
+      }
+      window.recordingStopFunctions[lectureId] = stopFunction;
+      
       setIsRecording(true);
       
-      console.log('🎤 Recording started with 2-second chunks');
+      console.log(`🎤 Recording started with Web Audio API (PCM streaming at ${targetSampleRate}Hz, ${bufferDuration}s chunks)`);
       
     } catch (error) {
       console.error('❌ Error accessing microphone:', error);
@@ -374,8 +592,29 @@ const LiveLecture = () => {
 
   // Stop recording
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    // Clear recording interval if it exists
+    if (window.recordingIntervals && window.recordingIntervals[lectureId]) {
+      clearInterval(window.recordingIntervals[lectureId]);
+      delete window.recordingIntervals[lectureId];
+    }
+    
+    // Call stop function if it exists (for PCM cleanup)
+    if (window.recordingStopFunctions && window.recordingStopFunctions[lectureId]) {
+      try {
+        window.recordingStopFunctions[lectureId]();
+        delete window.recordingStopFunctions[lectureId];
+      } catch (e) {
+        console.error('Error calling stop function:', e);
+      }
+    }
+    
+    // Disconnect script processor if it exists
+    if (mediaRecorderRef.current && typeof mediaRecorderRef.current.disconnect === 'function') {
+      try {
+        mediaRecorderRef.current.disconnect();
+      } catch (e) {
+        // Ignore disconnect errors
+      }
     }
     
     if (streamRef.current) {
@@ -386,13 +625,18 @@ const LiveLecture = () => {
       wsRef.current.close();
     }
     
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      try {
+        audioContextRef.current.close();
+      } catch (e) {
+        // Ignore if already closed
+      }
     }
     
     setIsRecording(false);
     setIsConnected(false);
     setAudioLevel(0);
+    // Keep transcript and segments - don't clear them on stop
   };
 
   // Toggle recording
@@ -404,17 +648,7 @@ const LiveLecture = () => {
     }
   };
 
-  useEffect(() => {
-    // Simulate AI suggestions appearing over time
-    if (isRecording && duration % 15 === 0 && duration > 0) {
-      const randomSuggestion = mockSuggestions[Math.floor(Math.random() * mockSuggestions.length)];
-      setAiSuggestions(prev => {
-        if (prev.length >= 3) return prev;
-        if (prev.some(s => s.id === randomSuggestion.id)) return prev;
-        return [...prev, { ...randomSuggestion, timestamp: duration }];
-      });
-    }
-  }, [duration, isRecording]);
+  // AI suggestions are now handled via WebSocket messages from backend
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -432,9 +666,21 @@ const LiveLecture = () => {
     setSelectedStudent(updatedStudent);
   };
 
-  const endLecture = () => {
-    stopRecording();
-    navigate(`/professor/analytics/${lectureId}`);
+  const endLecture = async () => {
+    try {
+      // Stop recording first
+      stopRecording();
+      
+      // End the lecture via API
+      await lecturesAPI.end(lectureId);
+      
+      // Navigate to analytics page
+      navigate(`/professor/analytics/${lectureId}`);
+    } catch (error) {
+      console.error('Failed to end lecture:', error);
+      // Still navigate even if API call fails
+      navigate(`/professor/analytics/${lectureId}`);
+    }
   };
 
   // PowerPoint handlers
@@ -480,40 +726,83 @@ const LiveLecture = () => {
     <div className="min-h-screen gradient-bg">
       {/* Header */}
       <div className="bg-slate-800/50 backdrop-blur-sm border-b border-slate-700">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <h1 className="text-2xl font-bold">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 py-3 md:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-4 md:gap-6">
+            {/* Mobile sidebar toggle */}
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="md:hidden p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              title="Toggle AI Assistant"
+            >
+              <Lightbulb size={20} className="text-cyan-400" />
+            </button>
+            <h1 className="text-xl md:text-2xl font-bold">
               <span className="text-slate-300">XP</span>
               <span className="text-cyan-400">LAB</span>
             </h1>
-            <div className="flex items-center gap-3">
-              <span className="text-slate-400">CSC2720 - Binary Search Trees</span>
+            <div className="flex items-center gap-2 md:gap-3">
+              <span className="text-slate-400 text-sm md:text-base">Live Lecture</span>
               {isRecording && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-red-500/20 border border-red-500 rounded-full animate-pulse">
+                <div className="flex items-center gap-2 px-2 md:px-3 py-1 bg-red-500/20 border border-red-500 rounded-full animate-pulse">
                   <div className="w-2 h-2 bg-red-500 rounded-full" />
-                  <span className="text-red-400 text-sm font-semibold">LIVE</span>
+                  <span className="text-red-400 text-xs md:text-sm font-semibold">LIVE</span>
                 </div>
               )}
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-lg">
-              <Clock size={20} />
-              <span className="font-mono font-bold">{formatTime(duration)}</span>
+          <div className="flex items-center gap-2 md:gap-4">
+            <div className="flex items-center gap-1 md:gap-2 text-base md:text-lg">
+              <Clock size={18} className="md:w-5 md:h-5" />
+              <span className="font-mono font-bold text-sm md:text-base">{formatTime(duration)}</span>
             </div>
+            <button
+              onClick={logout}
+              className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              title="Logout"
+            >
+              <LogOut size={18} className="md:w-5 md:h-5 text-slate-400 hover:text-white" />
+            </button>
             <button
               onClick={() => navigate('/professor/dashboard')}
               className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+              title="Close"
             >
-              <X size={24} />
+              <X size={20} className="md:w-6 md:h-6" />
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-73px)]">
-        {/* AI Assistant Panel */}
-        <div className="w-96 bg-slate-800/30 border-r border-slate-700 p-6 overflow-y-auto">
+      <div className="flex h-[calc(100vh-73px)] relative">
+        {/* Mobile backdrop overlay */}
+        {sidebarOpen && (
+          <div
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden fixed inset-0 bg-black/50 z-30 transition-opacity"
+          />
+        )}
+
+        {/* AI Assistant Panel - Responsive Sidebar */}
+        <div className={`
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+          fixed md:relative z-40
+          w-80 md:w-96 lg:w-[28rem]
+          h-full md:h-auto
+          bg-slate-800/30 backdrop-blur-sm
+          border-r border-slate-700
+          p-4 md:p-6
+          overflow-y-auto
+          transition-transform duration-300 ease-in-out
+          shadow-lg md:shadow-none
+        `}>
+          {/* Mobile close button */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden absolute top-4 right-4 p-2 hover:bg-slate-700 rounded-lg transition-colors z-50"
+            title="Close sidebar"
+          >
+            <X size={20} className="text-slate-400" />
+          </button>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-xl font-bold">AI Assistant</h2>
             <div className="flex items-center gap-2">
@@ -588,121 +877,265 @@ const LiveLecture = () => {
 
               {/* Voice Quality Metrics */}
               <div className="glass-card p-4">
-                <h3 className="text-sm font-semibold text-cyan-400 mb-3">Voice Quality Metrics</h3>
-                <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-cyan-400 mb-4 flex items-center gap-2">
+                  <TrendingUp size={16} />
+                  Real-Time Voice Quality
+                </h3>
+                <div className="space-y-4">
+                  {/* Clarity */}
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-slate-400">Volume</span>
-                      <span className={`font-semibold ${getMetricColor(voiceMetrics.volume)}`}>
-                        {voiceMetrics.volume}%
+                    <div className="flex justify-between items-center text-sm mb-2">
+                      <span className="text-slate-300 font-medium flex items-center gap-2">
+                        <CheckCircle size={14} />
+                        Clarity
+                      </span>
+                      <span className={`font-bold text-lg ${getMetricColor(voiceMetrics.clarity)}`}>
+                        {voiceMetrics.clarity.toFixed(1)}%
                       </span>
                     </div>
-                    <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${getMetricColor(voiceMetrics.volume).replace('text-', 'bg-')}`}
-                        style={{ width: `${voiceMetrics.volume}%` }}
+                    <div className="h-3 bg-slate-700/50 rounded-full overflow-hidden relative">
+                      <motion.div
+                        className={`h-full ${getMetricColor(voiceMetrics.clarity).replace('text-', 'bg-').replace('400', '500')}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${voiceMetrics.clarity}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
                       />
                     </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {voiceMetrics.clarity < 40 ? 'Many filler words' : voiceMetrics.clarity < 70 ? 'Some filler words' : 'Clear speech'}
+                    </p>
                   </div>
 
+                  {/* Pace */}
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-slate-400">Clarity</span>
-                      <span className={`font-semibold ${getMetricColor(voiceMetrics.clarity)}`}>
-                        {voiceMetrics.clarity}%
+                    <div className="flex justify-between items-center text-sm mb-2">
+                      <span className="text-slate-300 font-medium flex items-center gap-2">
+                        <Clock size={14} />
+                        Pace
+                      </span>
+                      <span className={`font-bold text-lg ${getMetricColor(voiceMetrics.pace)}`}>
+                        {voiceMetrics.pace.toFixed(1)}%
                       </span>
                     </div>
-                    <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${getMetricColor(voiceMetrics.clarity).replace('text-', 'bg-')}`}
-                        style={{ width: `${voiceMetrics.clarity}%` }}
+                    <div className="h-3 bg-slate-700/50 rounded-full overflow-hidden relative">
+                      <motion.div
+                        className={`h-full ${getMetricColor(voiceMetrics.pace).replace('text-', 'bg-').replace('400', '500')}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${voiceMetrics.pace}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
                       />
                     </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {voiceMetrics.pace < 40 ? 'Too slow/fast' : voiceMetrics.pace < 70 ? 'Good pace' : 'Optimal speaking rate'}
+                    </p>
                   </div>
 
+                  {/* Pitch Variation */}
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-slate-400">Pace</span>
-                      <span className={`font-semibold ${getMetricColor(voiceMetrics.pace)}`}>
-                        {voiceMetrics.pace}%
+                    <div className="flex justify-between items-center text-sm mb-2">
+                      <span className="text-slate-300 font-medium flex items-center gap-2">
+                        <TrendingUp size={14} />
+                        Pitch Variation
+                      </span>
+                      <span className={`font-bold text-lg ${getMetricColor(voiceMetrics.pitch)}`}>
+                        {voiceMetrics.pitch.toFixed(1)}%
                       </span>
                     </div>
-                    <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${getMetricColor(voiceMetrics.pace).replace('text-', 'bg-')}`}
-                        style={{ width: `${voiceMetrics.pace}%` }}
+                    <div className="h-3 bg-slate-700/50 rounded-full overflow-hidden relative">
+                      <motion.div
+                        className={`h-full ${getMetricColor(voiceMetrics.pitch).replace('text-', 'bg-').replace('400', '500')}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${voiceMetrics.pitch}%` }}
+                        transition={{ duration: 0.5, ease: "easeOut" }}
                       />
                     </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-slate-400">Pitch Variation</span>
-                      <span className={`font-semibold ${getMetricColor(voiceMetrics.pitch)}`}>
-                        {voiceMetrics.pitch}%
-                      </span>
-                    </div>
-                    <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full ${getMetricColor(voiceMetrics.pitch).replace('text-', 'bg-')}`}
-                        style={{ width: `${voiceMetrics.pitch}%` }}
-                      />
-                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      {voiceMetrics.pitch < 40 ? 'Monotone delivery' : voiceMetrics.pitch < 70 ? 'Some variation' : 'Engaging pitch variation'}
+                    </p>
                   </div>
                 </div>
               </div>
 
               {/* Current Metrics */}
               <div className="glass-card p-4">
-                <h3 className="text-sm font-semibold text-cyan-400 mb-2">Current Metrics</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
+                <h3 className="text-sm font-semibold text-cyan-400 mb-3 flex items-center gap-2">
+                  <Clock size={14} />
+                  Lecture Statistics
+                </h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between items-center">
                     <span className="text-slate-400">Talk Time</span>
-                    <span className="font-semibold">{Math.floor(duration / 60)} min</span>
+                    <span className="font-bold text-cyan-400">{Math.floor(duration / 60)}:{String(duration % 60).padStart(2, '0')}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Engagement</span>
-                    <span className="font-semibold text-green-400">82%</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Audio Chunks Processed</span>
+                    <span className="font-bold">{Math.floor(duration / 2)}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Chunks Sent</span>
-                    <span className="font-semibold">{Math.floor(duration / 2)}</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Students Present</span>
+                    <span className="font-bold text-green-400">{students.filter(s => s.present).length}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Questions Asked</span>
-                    <span className="font-semibold">3</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Total Participation</span>
+                    <span className="font-bold text-yellow-400">
+                      {students.reduce((sum, s) => sum + (s.participated || 0), 0)}
+                    </span>
+                  </div>
+                  <div className="pt-2 border-t border-slate-700">
+                    <div className="flex items-center gap-2 text-xs text-slate-500">
+                      <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                      <span>{isConnected ? 'Live metrics updating' : 'Waiting for connection...'}</span>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-sm font-semibold mb-3">Suggestions</h3>
-                <AnimatePresence>
-                  {aiSuggestions.length === 0 ? (
-                    <p className="text-sm text-slate-400">Looking good! Keep going...</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {aiSuggestions.map((suggestion) => {
-                        const Icon = suggestion.icon;
-                        return (
-                          <motion.div
-                            key={suggestion.id}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            exit={{ opacity: 0, x: 20 }}
-                            className="glass-card p-4"
-                          >
-                            <div className="flex items-start gap-3">
-                              <Icon className={suggestion.color} size={20} />
-                              <p className="text-sm flex-1">{suggestion.message}</p>
-                            </div>
-                          </motion.div>
-                        );
-                      })}
+              {/* Sentiment Analysis & Tone */}
+              <div className="glass-card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
+                    <Lightbulb size={14} />
+                    AI Sentiment Analysis
+                  </h3>
+                  {isConnected && sentimentData.tone_description && (
+                    <div className="flex items-center gap-1 text-xs text-green-400">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                      <span>Active</span>
                     </div>
                   )}
-                </AnimatePresence>
+                </div>
+                {(sentimentData.tone_description || sentimentData.sentiment_label !== 'neutral' || sentimentData.engagement_indicators?.length > 0) ? (
+                  <div className="space-y-3">
+                    {/* Sentiment Score */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-400">Sentiment</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-sm font-bold px-2 py-1 rounded ${
+                          sentimentData.sentiment_label === 'positive' 
+                            ? 'bg-green-500/20 text-green-400' 
+                            : sentimentData.sentiment_label === 'negative'
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-slate-700/50 text-slate-400'
+                        }`}>
+                          {sentimentData.sentiment_label?.toUpperCase() || 'NEUTRAL'}
+                        </span>
+                        {(sentimentData.sentiment_score !== undefined && sentimentData.sentiment_score !== 0) && (
+                          <span className="text-xs text-slate-500">
+                            ({sentimentData.sentiment_score > 0 ? '+' : ''}{sentimentData.sentiment_score.toFixed(2)})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Tone Description */}
+                    {sentimentData.tone_description && (
+                      <div>
+                        <span className="text-xs text-slate-400 block mb-1">Tone</span>
+                        <p className="text-sm text-slate-300 italic">{sentimentData.tone_description}</p>
+                      </div>
+                    )}
+                    
+                    {/* Engagement Indicators */}
+                    {sentimentData.engagement_indicators && sentimentData.engagement_indicators.length > 0 && (
+                      <div>
+                        <span className="text-xs text-slate-400 block mb-2">Engagement Indicators</span>
+                        <div className="flex flex-wrap gap-2">
+                          {sentimentData.engagement_indicators.map((indicator, idx) => (
+                            <span 
+                              key={idx}
+                              className="text-xs px-2 py-1 bg-cyan-500/10 text-cyan-400 rounded border border-cyan-500/20"
+                            >
+                              {indicator}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Confidence Score */}
+                    {(sentimentData.confidence !== undefined && sentimentData.confidence > 0) && (
+                      <div className="pt-2 border-t border-slate-700">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400">Confidence</span>
+                          <span className="text-slate-300">{Math.round(sentimentData.confidence * 100)}%</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500 italic">
+                    {isConnected 
+                      ? 'Sentiment analysis will appear here every 12 seconds...' 
+                      : 'Start recording to see AI sentiment analysis'}
+                  </p>
+                )}
               </div>
+
+              {/* Live Transcription */}
+              <div className="glass-card p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-cyan-400 flex items-center gap-2">
+                    <Mic size={14} />
+                    Live Transcription
+                  </h3>
+                  {isConnected && (
+                    <div className="flex items-center gap-1 text-xs text-green-400">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                      <span>Live</span>
+                    </div>
+                  )}
+                </div>
+                <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-700 max-h-64 overflow-y-auto">
+                  {transcriptSegments.length > 0 || transcript ? (
+                    <div className="space-y-2">
+                      <AnimatePresence>
+                        {transcriptSegments.map((segment, index) => (
+                          <motion.div
+                            key={`${segment.timestamp}-${index}`}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="text-sm text-slate-300 leading-relaxed"
+                          >
+                            <span className="text-cyan-400/70">[{new Date(segment.timestamp).toLocaleTimeString()}]</span> {segment.text}
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                      {transcriptSegments.length === 0 && transcript && (
+                        <p className="text-sm text-slate-300 leading-relaxed">{transcript}</p>
+                      )}
+                      {transcriptSegments.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-700">
+                          <p className="text-xs text-slate-500">
+                            Last updated: {transcriptSegments[transcriptSegments.length - 1]?.timestamp 
+                              ? new Date(transcriptSegments[transcriptSegments.length - 1].timestamp).toLocaleTimeString()
+                              : 'Just now'}
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            Total segments: {transcriptSegments.length}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-center py-4">
+                      <p className="text-sm text-slate-500 italic mb-2">
+                        {isConnected 
+                          ? 'Waiting for transcription... (every 10 seconds)' 
+                          : 'Start recording to see live transcription'}
+                      </p>
+                      {isConnected && (
+                        <div className="flex items-center justify-center gap-2 text-xs text-slate-400">
+                          <div className="w-2 h-2 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+                          <span>Listening to audio...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
 
               <div className="glass-card p-4">
                 <h3 className="text-sm font-semibold text-cyan-400 mb-3">Quick Activities</h3>
@@ -722,8 +1155,19 @@ const LiveLecture = () => {
           )}
         </div>
 
+        {/* Mobile sidebar toggle button */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden fixed top-20 left-4 z-30 p-3 bg-slate-800/90 backdrop-blur-sm border border-slate-700 rounded-lg shadow-lg hover:bg-slate-700 transition-colors"
+            title="Open AI Assistant"
+          >
+            <Lightbulb size={20} className="text-cyan-400" />
+          </button>
+        )}
+
         {/* Student Participation Panel */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 w-full">
           <div className="max-w-4xl mx-auto space-y-8">
             
             {/* PowerPoint Presentation */}
@@ -933,17 +1377,23 @@ const LiveLecture = () => {
               </h2>
               <div className="flex items-center gap-4">
                 <span className="text-slate-400">
-                  Present: <span className="font-bold text-green-400">{students.filter(s => s.present).length}</span> / {students.length}
+                  Present: <span className="font-bold text-green-400">{students.filter(s => s.present).length}</span> {students.length > 0 && ` / ${students.length}`}
                 </span>
-                <button className="btn-primary">
-                  Random Call
-                </button>
               </div>
             </div>
 
             <div className="glass-card p-6">
-              <div className="grid grid-cols-2 gap-4">
-                {students.map((student) => (
+              {studentsLoading ? (
+                <div className="text-center py-12 text-slate-400">Loading attendance...</div>
+              ) : students.length === 0 ? (
+                <div className="text-center py-12 text-slate-400">
+                  <Users size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No students have checked in yet.</p>
+                  <p className="text-sm mt-2">Students can join using the lecture code.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {students.map((student) => (
                   <motion.button
                     key={student.id}
                     whileHover={student.present ? { scale: 1.02 } : {}}
@@ -971,7 +1421,8 @@ const LiveLecture = () => {
                     <p className="text-xs text-slate-400">Last active: {student.lastActive}</p>
                   </motion.button>
                 ))}
-              </div>
+                </div>
+              )}
             </div>
             </div>
 

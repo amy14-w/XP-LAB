@@ -32,11 +32,21 @@ const Login = () => {
         }
       } else {
         setError(result.error || 'Login failed. Please check your credentials.');
+        setLoading(false);
       }
     } catch (err) {
-      setError('An error occurred. Please try again.');
       console.error('Login error:', err);
-    } finally {
+      // Extract error message from the error
+      const errorMessage = err?.message || err?.toString() || 'An error occurred. Please try again.';
+      
+      // Check if it's a network error (backend not running)
+      if (errorMessage.includes('fetch') || errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        setError('Cannot connect to server. Please make sure the backend is running on http://localhost:8000');
+      } else if (errorMessage.includes('email') && errorMessage.includes('confirm')) {
+        setError('Email not confirmed. Please check your email to confirm your account before logging in.');
+      } else {
+        setError(errorMessage);
+      }
       setLoading(false);
     }
   };

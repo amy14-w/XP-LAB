@@ -36,6 +36,15 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       const response = await authAPI.login(email, password);
+      
+      // Check if response has required fields
+      if (!response || !response.user_id || !response.access_token) {
+        return { 
+          success: false, 
+          error: 'Invalid response from server. Please try again.' 
+        };
+      }
+      
       const userData = {
         user_id: response.user_id,
         email: response.email,
@@ -51,7 +60,9 @@ export const AuthProvider = ({ children }) => {
       return { success: true, role: response.role };
     } catch (error) {
       console.error('Login failed:', error);
-      return { success: false, error: error.message };
+      // Extract error message from error object
+      const errorMessage = error?.message || error?.toString() || 'Login failed. Please check your credentials.';
+      return { success: false, error: errorMessage };
     }
   };
 

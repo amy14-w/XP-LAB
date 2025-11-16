@@ -17,6 +17,7 @@ class Lecture(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     presentation_file_url: Optional[str] = None
+    transcript: Optional[str] = None  # Full lecture transcript (saved when lecture ends)
     status: LectureStatus = LectureStatus.SCHEDULED
 
 

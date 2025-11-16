@@ -99,6 +99,12 @@ export const classesAPI = {
       body: JSON.stringify({ name }),
     });
   },
+
+  delete: async (classId, professorId) => {
+    return await apiRequest(`/classes/${classId}?professor_id=${professorId}`, {
+      method: 'DELETE',
+    });
+  },
 };
 
 // Lectures API
@@ -130,6 +136,10 @@ export const lecturesAPI = {
       method: 'POST',
     });
   },
+  
+  getAttendance: async (lectureId) => {
+    return await apiRequest(`/lectures/${lectureId}/attendance`);
+  },
 };
 
 // Students API
@@ -144,11 +154,15 @@ export const studentsAPI = {
   
   getLeaderboard: async (classId = null, studentId = null) => {
     // Backend endpoint: /students/{student_id}/leaderboard?class_id={class_id}
-    // student_id is required in path but not used (could be any value)
+    // student_id is required in path
     // class_id is optional query parameter
-    const placeholderId = studentId || 'placeholder';
+    const id = studentId || 'placeholder';
     const query = classId ? `?class_id=${classId}` : '';
-    return await apiRequest(`/students/${placeholderId}/leaderboard${query}`);
+    return await apiRequest(`/students/${id}/leaderboard${query}`);
+  },
+  
+  getStudentClasses: async (studentId) => {
+    return await apiRequest(`/students/${studentId}/classes`);
   },
   
   getQuestionStats: async (studentId) => {
@@ -161,6 +175,14 @@ export const studentsAPI = {
     if (classId) params.append('class_id', classId);
     const query = params.toString() ? `?${params.toString()}` : '';
     return await apiRequest(`/students/${studentId}/badges${query}`);
+  },
+  
+  getClassStudents: async (classId, professorId) => {
+    return await apiRequest(`/students/class/${classId}/students?professor_id=${professorId}`);
+  },
+  
+  getProfessorStudents: async (professorId) => {
+    return await apiRequest(`/students/professor/${professorId}/students`);
   },
 };
 
@@ -185,6 +207,12 @@ export const attendanceAPI = {
 export const analyticsAPI = {
   getLectureAnalytics: async (lectureId, professorId) => {
     return await apiRequest(`/analytics/lectures/${lectureId}?professor_id=${professorId}`);
+  },
+  listReports: async (professorId) => {
+    return await apiRequest(`/analytics/reports?professor_id=${professorId}`);
+  },
+  getReport: async (lectureId, professorId) => {
+    return await apiRequest(`/analytics/reports/${lectureId}?professor_id=${professorId}`);
   },
 };
 

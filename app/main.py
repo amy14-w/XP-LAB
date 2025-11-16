@@ -11,10 +11,18 @@ app = FastAPI(title="XP Lab API", version="2.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual origins
+    # Explicit origins are required when allow_credentials=True.
+    # Support common dev hosts on any port via regex.
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],  # Accept all request headers
+    expose_headers=["*"],  # Expose all response headers
+    max_age=600,
 )
 
 # Include routers

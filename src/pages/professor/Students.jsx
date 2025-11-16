@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Users, TrendingUp, Trophy, Award, Flame, ChevronDown, ChevronUp, BookOpen, Target, Clock, Star, Medal, LogOut, MoreHorizontal } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
+import { classesAPI, studentsAPI } from '../../services/api';
 
 const Students = () => {
   const navigate = useNavigate();
@@ -10,154 +11,59 @@ const Students = () => {
   const [selectedClass, setSelectedClass] = useState('all');
   const [expandedStudent, setExpandedStudent] = useState(null);
   const [sortBy, setSortBy] = useState('points'); // 'points', 'name', 'streak', 'rank'
+  const [classes, setClasses] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Mock data - Replace with API calls
-  const classes = [
-    { id: 'all', name: 'All Classes', student_count: 24 },
-    { id: 'cs101', name: 'CS101 - Data Structures', student_count: 12 },
-    { id: 'cs201', name: 'CS201 - Algorithms', student_count: 8 },
-    { id: 'math301', name: 'MATH301 - Discrete Math', student_count: 4 },
-  ];
+  // Fetch classes and students
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!user?.user_id) return;
+      
+      setLoading(true);
+      try {
+        // Fetch professor's classes
+        const classesData = await classesAPI.getAll(user.user_id);
+        const classesList = [
+          { id: 'all', name: 'All Classes', student_count: 0 },
+          ...(classesData || []).map(cls => ({ 
+            id: cls.class_id, 
+            name: cls.name, 
+            student_count: 0 // Will be updated
+          }))
+        ];
+        setClasses(classesList);
+        
+        // Fetch all students
+        const allStudents = await studentsAPI.getProfessorStudents(user.user_id);
+        
+        // Update student counts per class
+        const updatedClasses = classesList.map(cls => {
+          if (cls.id === 'all') {
+            return { ...cls, student_count: allStudents.length };
+          }
+          const classStudents = allStudents.filter(s => s.class_id === cls.id);
+          return { ...cls, student_count: classStudents.length };
+        });
+        setClasses(updatedClasses);
+        
+        setStudents(allStudents || []);
+      } catch (error) {
+        console.error('Failed to fetch students:', error);
+        setStudents([]);
+        setClasses([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchData();
+  }, [user]);
 
-  const students = [
-    {
-      id: 1,
-      name: 'Sarah Chen',
-      email: 'sarah.chen@university.edu',
-      class_id: 'cs101',
-      class_name: 'CS101 - Data Structures',
-      points: 1520,
-      rank: 'Master',
-      streak: 23,
-      attendance: 95,
-      participation_rate: 88,
-      avg_quiz_score: 92,
-      badges: [
-        { id: 1, name: 'Hot Streak', icon: '🔥', description: '3 correct answers in a row' },
-        { id: 2, name: 'Perfect Score', icon: '💯', description: '100% on quiz' },
-        { id: 3, name: 'Fast Learner', icon: '⚡', description: 'Fastest correct answer' },
-        { id: 4, name: 'Week Warrior', icon: '📅', description: '7 day streak' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Binary Search Trees', score: 95, date: '2025-11-10' },
-        { id: 2, topic: 'Hash Tables', score: 100, date: '2025-11-08' },
-        { id: 3, topic: 'Linked Lists', score: 88, date: '2025-11-05' },
-      ]
-    },
-    {
-      id: 2,
-      name: 'Mike Thompson',
-      email: 'mike.t@university.edu',
-      class_id: 'cs101',
-      class_name: 'CS101 - Data Structures',
-      points: 1350,
-      rank: 'Diamond',
-      streak: 15,
-      attendance: 92,
-      participation_rate: 75,
-      avg_quiz_score: 85,
-      badges: [
-        { id: 1, name: 'Hot Streak', icon: '🔥', description: '3 correct answers in a row' },
-        { id: 2, name: 'Top 3', icon: '🏆', description: 'Finished in top 3' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Binary Search Trees', score: 85, date: '2025-11-10' },
-        { id: 2, topic: 'Hash Tables', score: 90, date: '2025-11-08' },
-        { id: 3, topic: 'Linked Lists', score: 80, date: '2025-11-05' },
-      ]
-    },
-    {
-      id: 3,
-      name: 'Emily Rodriguez',
-      email: 'emily.r@university.edu',
-      class_id: 'cs201',
-      class_name: 'CS201 - Algorithms',
-      points: 890,
-      rank: 'Platinum',
-      streak: 8,
-      attendance: 88,
-      participation_rate: 82,
-      avg_quiz_score: 78,
-      badges: [
-        { id: 1, name: 'Comeback Kid', icon: '💪', description: 'Improved score after cold badge' },
-        { id: 2, name: 'Streak Saver', icon: '🛡️', description: 'Used streak saver' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Dynamic Programming', score: 75, date: '2025-11-10' },
-        { id: 2, topic: 'Greedy Algorithms', score: 82, date: '2025-11-08' },
-        { id: 3, topic: 'Divide & Conquer', score: 77, date: '2025-11-05' },
-      ]
-    },
-    {
-      id: 4,
-      name: 'David Park',
-      email: 'david.p@university.edu',
-      class_id: 'cs101',
-      class_name: 'CS101 - Data Structures',
-      points: 425,
-      rank: 'Gold',
-      streak: 5,
-      attendance: 78,
-      participation_rate: 65,
-      avg_quiz_score: 72,
-      badges: [
-        { id: 1, name: 'First Steps', icon: '👣', description: 'Completed first quiz' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Binary Search Trees', score: 70, date: '2025-11-10' },
-        { id: 2, topic: 'Hash Tables', score: 75, date: '2025-11-08' },
-        { id: 3, topic: 'Linked Lists', score: 71, date: '2025-11-05' },
-      ]
-    },
-    {
-      id: 5,
-      name: 'Lisa Wang',
-      email: 'lisa.w@university.edu',
-      class_id: 'cs201',
-      class_name: 'CS201 - Algorithms',
-      points: 1620,
-      rank: 'Master',
-      streak: 32,
-      attendance: 98,
-      participation_rate: 95,
-      avg_quiz_score: 96,
-      badges: [
-        { id: 1, name: 'Hot Streak', icon: '🔥', description: '3 correct answers in a row' },
-        { id: 2, name: 'Perfect Score', icon: '💯', description: '100% on quiz' },
-        { id: 3, name: 'Fast Learner', icon: '⚡', description: 'Fastest correct answer' },
-        { id: 4, name: 'Top 3', icon: '🏆', description: 'Finished in top 3' },
-        { id: 5, name: 'Month Master', icon: '🗓️', description: '30 day streak' },
-        { id: 6, name: 'Scholar', icon: '🎓', description: '10 perfect scores' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Dynamic Programming', score: 100, date: '2025-11-10' },
-        { id: 2, topic: 'Greedy Algorithms', score: 95, date: '2025-11-08' },
-        { id: 3, topic: 'Divide & Conquer', score: 93, date: '2025-11-05' },
-      ]
-    },
-    {
-      id: 6,
-      name: 'James Miller',
-      email: 'james.m@university.edu',
-      class_id: 'math301',
-      class_name: 'MATH301 - Discrete Math',
-      points: 680,
-      rank: 'Platinum',
-      streak: 12,
-      attendance: 85,
-      participation_rate: 70,
-      avg_quiz_score: 80,
-      badges: [
-        { id: 1, name: 'Hot Streak', icon: '🔥', description: '3 correct answers in a row' },
-        { id: 2, name: 'Week Warrior', icon: '📅', description: '7 day streak' },
-      ],
-      quiz_history: [
-        { id: 1, topic: 'Graph Theory', score: 82, date: '2025-11-10' },
-        { id: 2, topic: 'Set Theory', score: 78, date: '2025-11-08' },
-        { id: 3, topic: 'Logic', score: 80, date: '2025-11-05' },
-      ]
-    },
-  ];
+  // Filter students based on selected class
+  const filteredStudents = selectedClass === 'all' 
+    ? students 
+    : students.filter(s => s.class_id === selectedClass);
 
   const getRankColor = (rank) => {
     const colors = {
@@ -169,6 +75,11 @@ const Students = () => {
       'Bronze': 'text-orange-400',
     };
     return colors[rank] || 'text-slate-400';
+  };
+
+  const getRankDisplay = (rank) => {
+    if (!rank) return 'Bronze';
+    return rank.charAt(0).toUpperCase() + rank.slice(1);
   };
 
   const getRankBgColor = (rank) => {
@@ -189,10 +100,6 @@ const Students = () => {
     return 'text-red-400';
   };
 
-  const filteredStudents = selectedClass === 'all' 
-    ? students 
-    : students.filter(s => s.class_id === selectedClass);
-
   const sortedStudents = [...filteredStudents].sort((a, b) => {
     switch (sortBy) {
       case 'points':
@@ -202,8 +109,10 @@ const Students = () => {
       case 'streak':
         return b.streak - a.streak;
       case 'rank':
-        const rankOrder = { 'Master': 6, 'Diamond': 5, 'Platinum': 4, 'Gold': 3, 'Silver': 2, 'Bronze': 1 };
-        return (rankOrder[b.rank] || 0) - (rankOrder[a.rank] || 0);
+        const rankOrder = { 'master': 6, 'diamond': 5, 'platinum': 4, 'gold': 3, 'silver': 2, 'bronze': 1 };
+        const aRank = (a.rank || 'bronze').toLowerCase();
+        const bRank = (b.rank || 'bronze').toLowerCase();
+        return (rankOrder[bRank] || 0) - (rankOrder[aRank] || 0);
       default:
         return 0;
     }
@@ -243,7 +152,7 @@ const Students = () => {
               <span>CLASSES</span>
             </button>
             <button
-              onClick={() => navigate('/professor/analytics')}
+              onClick={() => navigate('/professor/reports')}
               className="nav-item w-full"
             >
               <TrendingUp size={20} />
@@ -253,7 +162,7 @@ const Students = () => {
               <Users size={20} />
               <span>STUDENTS</span>
             </button>
-            <button className="nav-item w-full">
+            <button onClick={() => navigate('/professor/more')} className="nav-item w-full">
               <MoreHorizontal size={20} />
               <span>MORE</span>
             </button>
@@ -311,6 +220,15 @@ const Students = () => {
             </div>
 
             {/* Students List */}
+            {loading ? (
+              <div className="text-center py-12 text-slate-400">Loading students...</div>
+            ) : sortedStudents.length === 0 ? (
+              <div className="text-center py-12 text-slate-400">
+                <Users size={48} className="mx-auto mb-4 opacity-50" />
+                <p>No students found{selectedClass !== 'all' ? ' in this class' : ''}.</p>
+                <p className="text-sm mt-2">Students appear here after they check into a lecture.</p>
+              </div>
+            ) : (
             <div className="space-y-4">
               {sortedStudents.map((student, index) => (
                 <motion.div
@@ -331,7 +249,9 @@ const Students = () => {
                         <div className="flex items-center gap-3">
                           <div className="text-2xl font-bold text-slate-600">#{index + 1}</div>
                           <div className={`px-3 py-1 rounded-lg border ${getRankBgColor(student.rank)}`}>
-                            <span className={`font-bold ${getRankColor(student.rank)}`}>{student.rank}</span>
+                            <span className={`font-bold ${getRankColor(getRankDisplay(student.rank))}`}>
+                              {getRankDisplay(student.rank)}
+                            </span>
                           </div>
                         </div>
 
@@ -437,28 +357,32 @@ const Students = () => {
                               <Star className="text-cyan-400" size={20} />
                               Recent Quiz Performance
                             </h4>
-                            <div className="space-y-2">
-                              {student.quiz_history.map((quiz) => (
-                                <div
-                                  key={quiz.id}
-                                  className="bg-slate-700/50 rounded-lg p-3 border border-slate-600"
-                                >
-                                  <div className="flex items-center justify-between mb-1">
-                                    <p className="font-semibold text-sm">{quiz.topic}</p>
-                                    <span className={`text-lg font-bold ${getPerformanceColor(quiz.score)}`}>
-                                      {quiz.score}%
-                                    </span>
+                            {student.quiz_history && student.quiz_history.length > 0 ? (
+                              <div className="space-y-2">
+                                {student.quiz_history.map((quiz) => (
+                                  <div
+                                    key={quiz.id}
+                                    className="bg-slate-700/50 rounded-lg p-3 border border-slate-600"
+                                  >
+                                    <div className="flex items-center justify-between mb-1">
+                                      <p className="font-semibold text-sm">{quiz.topic}</p>
+                                      <span className={`text-lg font-bold ${getPerformanceColor(quiz.score)}`}>
+                                        {quiz.score}%
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400">
+                                      {new Date(quiz.date).toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric', 
+                                        year: 'numeric' 
+                                      })}
+                                    </p>
                                   </div>
-                                  <p className="text-xs text-slate-400">
-                                    {new Date(quiz.date).toLocaleDateString('en-US', { 
-                                      month: 'short', 
-                                      day: 'numeric', 
-                                      year: 'numeric' 
-                                    })}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-slate-400">No quiz history available yet.</p>
+                            )}
                           </div>
 
                           {/* Performance Metrics */}
@@ -524,12 +448,6 @@ const Students = () => {
                 </motion.div>
               ))}
             </div>
-
-            {filteredStudents.length === 0 && (
-              <div className="text-center py-12 text-slate-400">
-                <Users size={48} className="mx-auto mb-4 opacity-50" />
-                <p>No students found in this class.</p>
-              </div>
             )}
           </div>
         </div>
