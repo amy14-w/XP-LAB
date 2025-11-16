@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS lectures (
     start_time TIMESTAMP WITH TIME ZONE,
     end_time TIMESTAMP WITH TIME ZONE,
     presentation_file_url TEXT,
+    transcript TEXT, -- Full lecture transcript saved when lecture ends
     status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'active', 'ended')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

@@ -51,6 +51,7 @@ def transcribe_audio_chunk(audio_data: np.ndarray,
                 file=audio_file
             )
         
+        # Return the transcribed text directly (Whisper returns a Transcription object with .text attribute)
         return transcript.text.strip()
     
     finally:
