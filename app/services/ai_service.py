@@ -62,23 +62,46 @@ async def analyze_lecture_engagement(transcript: str, recent_minutes: int = 3) -
     return json.loads(content)
 
 
-async def generate_question_full(lecture_context: str) -> Dict:
-    """Generate a complete multiple choice question with 4 options and correct answer."""
-    prompt = f"""Based on this lecture content, create a multiple choice question in valid JSON format:
+async def generate_question_full(lecture_context: str, slide_content: str = None) -> Dict:
+    """Generate a complete multiple choice question with 4 options and correct answer.
     
-    Context: {lecture_context}
+    Uses slide content (PowerPoint material) as primary context if provided,
+    otherwise falls back to lecture transcript.
+    """
+    # Prioritize slide content if available (more structured and relevant)
+    if slide_content and len(slide_content.strip()) > 50:
+        primary_context = slide_content
+        context_type = "PowerPoint presentation slides"
+    else:
+        primary_context = lecture_context
+        context_type = "lecture transcript"
+    
+    prompt = f"""Based on this {context_type} from the current lecture, create a multiple choice question in valid JSON format.
+    
+    The question should test students' understanding of the specific concepts, definitions, algorithms, or examples 
+    presented in the {context_type}. Make it directly relevant to what has been taught so far.
+    
+    {context_type.capitalize()} Content:
+    {primary_context}
     
     Return ONLY a valid JSON object with these exact keys:
     {{
-        "question_text": "A clear, concise question",
-        "option_a": "First option",
-        "option_b": "Second option",
-        "option_c": "Third option",
-        "option_d": "Fourth option",
+        "question_text": "A clear, concise question that tests understanding of the lecture material",
+        "option_a": "First option (plausible but incorrect if not the right answer)",
+        "option_b": "Second option (plausible but incorrect if not the right answer)",
+        "option_c": "Third option (plausible but incorrect if not the right answer)",
+        "option_d": "Fourth option (plausible but incorrect if not the right answer)",
         "correct_answer": "a" or "b" or "c" or "d"
     }}
     
-    Make the question relevant to the recent lecture content and ensure the correct answer is accurate.
+    Requirements:
+    - The question must be directly relevant to the {context_type} content provided above
+    - Focus on testing comprehension of key concepts, not trivial details
+    - Ensure the correct answer is factually accurate based on the content
+    - Make distractor options plausible but clearly incorrect
+    - If the {context_type} discusses specific topics (e.g., Binary Search Trees, System Programming, etc.), 
+      generate a question about those specific topics
+    
     Do not include any text outside the JSON object."""
     
     response = client.chat.completions.create(

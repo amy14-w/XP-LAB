@@ -68,43 +68,104 @@ async def end_lecture(lecture_id: str):
     except Exception as e:
         print(f"⚠ Could not access transcript from memory: {e}")
     
-    # Update lecture with end time, status, and transcript
+    # Calculate duration BEFORE updating the lecture (we need start_time from current record)
+    duration_minutes = 0
+    try:
+        # Get current lecture to access start_time
+        current_lecture = supabase.table("lectures").select("start_time, end_time").eq("lecture_id", lecture_id).execute()
+        if current_lecture.data:
+            start_time_str = current_lecture.data[0].get("start_time")
+            existing_end_time = current_lecture.data[0].get("end_time")
+            
+            print(f"🔍 Duration calculation debug: lecture_id={lecture_id}, start_time={start_time_str}, existing_end_time={existing_end_time}, new_end_time={end_time.isoformat()}")
+            
+            if start_time_str:
+                # Helper function for robust datetime parsing
+                def parse_dt(dt_str):
+                    if not dt_str:
+                        return None
+                    if isinstance(dt_str, str):
+                        raw = dt_str
+                        if raw.endswith('Z'):
+                            raw = raw.replace('Z', '+00:00')
+                        try:
+                            dt = datetime.fromisoformat(raw)
+                        except ValueError:
+                            # Try alternative format
+                            try:
+                                dt = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S%z")
+                            except:
+                                dt = datetime.fromisoformat(raw.replace('Z', ''))
+                                if dt.tzinfo is None:
+                                    dt = dt.replace(tzinfo=timezone.utc)
+                                return dt
+                    else:
+                        dt = dt_str
+                    if dt and dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    return dt
+                
+                sdt = parse_dt(start_time_str)
+                edt = parse_dt(end_time.isoformat())
+                
+                print(f"🔍 Parsed datetimes: sdt={sdt}, edt={edt}")
+                
+                if sdt and edt:
+                    duration_seconds = (edt - sdt).total_seconds()
+                    duration_minutes = max(0, int(duration_seconds / 60))
+                    print(f"✓ Calculated duration: {duration_minutes} minutes ({duration_seconds:.1f} seconds) from {sdt} to {edt}")
+                else:
+                    print(f"⚠ Could not parse start_time={start_time_str} (parsed={sdt}) or end_time={end_time.isoformat()} (parsed={edt})")
+                    duration_minutes = 0
+            else:
+                print(f"⚠ Missing start_time in lecture record for {lecture_id}")
+                duration_minutes = 0
+        else:
+            print(f"⚠ Could not find lecture {lecture_id} to calculate duration")
+            duration_minutes = 0
+    except Exception as e:
+        print(f"⚠ Error calculating duration: {e}")
+        import traceback
+        traceback.print_exc()
+        duration_minutes = 0
+    
+    print(f"🔍 Final duration_minutes before save: {duration_minutes}")
+    
+    # Update lecture with end time, status, transcript, AND duration_minutes
     update_data = {
         "end_time": end_time.isoformat(),
-        "status": LectureStatus.ENDED.value
+        "status": LectureStatus.ENDED.value,
+        "duration_minutes": duration_minutes  # Save duration directly to lectures table
     }
     
     if transcript_to_save:
         update_data["transcript"] = transcript_to_save
     
+    print(f"🔍 Updating lecture {lecture_id} with: {update_data}")
+    
     # Force-return updated row so result.data is populated (and proceed with snapshot regardless)
     result = supabase.table("lectures").update(update_data).eq("lecture_id", lecture_id).select("*").execute()
     
-    if True:
+    if result.data:
+        # Verify duration was saved correctly
+        saved_duration = result.data[0].get("duration_minutes")
+        print(f"🔍 Duration saved to database: {saved_duration} (expected: {duration_minutes})")
+        if saved_duration is None or saved_duration != duration_minutes:
+            print(f"⚠ WARNING: Duration mismatch! Saved={saved_duration}, Expected={duration_minutes}")
+        
         # Attempt to snapshot a lecture report for later access
         try:
-            # Load lecture and class info for report fields
-            lecture_row = supabase.table("lectures").select("*").eq("lecture_id", lecture_id).execute().data[0]
+            # Use the updated lecture row from the update result (already has end_time and duration_minutes)
+            lecture_row = result.data[0]
             class_id = lecture_row.get("class_id")
             start_time = lecture_row.get("start_time")
             end_time_str = lecture_row.get("end_time")
+            # Use duration_minutes from the database (should match what we saved)
+            duration_minutes = lecture_row.get("duration_minutes", duration_minutes)
+            print(f"🔍 Using duration_minutes from database row: {duration_minutes}")
             class_row = supabase.table("classes").select("*").eq("class_id", class_id).execute().data[0] if class_id else None
             topic = class_row.get("name") if class_row else "Lecture"
             professor_id = class_row.get("professor_id") if class_row else None
-
-            # Duration minutes
-            duration_minutes = 0
-            try:
-                if start_time and end_time_str:
-                    sdt = datetime.fromisoformat(start_time.replace('Z', '+00:00')) if isinstance(start_time, str) else start_time
-                    edt = datetime.fromisoformat(end_time_str.replace('Z', '+00:00')) if isinstance(end_time_str, str) else end_time_str
-                    if sdt.tzinfo is None:
-                        sdt = sdt.replace(tzinfo=timezone.utc)
-                    if edt.tzinfo is None:
-                        edt = edt.replace(tzinfo=timezone.utc)
-                    duration_minutes = int((edt - sdt).total_seconds() / 60)
-            except Exception:
-                duration_minutes = 0
 
             # Build engagement score and timeline from in-memory pipeline if available
             engagement_score = 75
@@ -140,7 +201,7 @@ async def end_lecture(lecture_id: str):
             except Exception as e:
                 print(f"⚠ Could not build engagement for report: {e}")
 
-            # Talk time ratios
+            # Talk time ratios - calculate properly using question periods
             professor_ratio = None
             student_ratio = None
             try:
@@ -148,10 +209,82 @@ async def end_lecture(lecture_id: str):
                 # Total seconds for ratio
                 total_seconds = duration_minutes * 60 if duration_minutes and duration_minutes > 0 else 0
                 prof_seconds = lecture_talk_time.get(lecture_id, 0.0) if total_seconds else 0.0
+                
+                # Get student talk time from question periods (same logic as analytics.py)
+                student_talk_time_seconds = 0.0
+                questions_from_db = 0
+                try:
+                    questions_result = supabase.table("questions").select("triggered_at, revealed_at").eq("lecture_id", lecture_id).eq("status", "revealed").execute()
+                    if questions_result.data:
+                        for question in questions_result.data:
+                            triggered_at = question.get("triggered_at")
+                            revealed_at = question.get("revealed_at")
+                            if triggered_at and revealed_at:
+                                try:
+                                    # Helper to parse datetime
+                                    def parse_dt_simple(dt_str):
+                                        if not dt_str:
+                                            return None
+                                        if isinstance(dt_str, str):
+                                            raw = dt_str
+                                            if raw.endswith('Z'):
+                                                raw = raw.replace('Z', '+00:00')
+                                            dt = datetime.fromisoformat(raw)
+                                        else:
+                                            dt = dt_str
+                                        if dt and dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=timezone.utc)
+                                        return dt
+                                    trigger_dt = parse_dt_simple(triggered_at)
+                                    reveal_dt = parse_dt_simple(revealed_at)
+                                    if trigger_dt and reveal_dt:
+                                        question_duration = (reveal_dt - trigger_dt).total_seconds()
+                                        student_talk_time_seconds += max(0, question_duration)
+                                        questions_from_db += 1
+                                except Exception as e:
+                                    print(f"⚠ Error calculating question duration: {e}")
+                                    pass
+                    
+                    # Also estimate from transcript question marks
+                    if transcript_to_save:
+                        total_question_marks = transcript_to_save.count("?")
+                        untracked_questions = max(0, total_question_marks - questions_from_db)
+                        estimated_question_time = untracked_questions * 5  # 5 seconds per untracked question
+                        student_talk_time_seconds += estimated_question_time
+                except Exception as e:
+                    print(f"⚠ Error calculating student talk time: {e}")
+                    pass
+                
                 if total_seconds > 0:
-                    professor_ratio = min((prof_seconds / total_seconds) * 100.0, 100.0)
-                    student_ratio = max(0.0, 100.0 - professor_ratio)
-            except Exception:
+                    # Calculate ratios properly
+                    professor_base_ratio = min((prof_seconds / total_seconds) * 100.0, 100.0)
+                    student_base_ratio = min((student_talk_time_seconds / total_seconds) * 100.0, 100.0)
+                    
+                    # If student time exceeds professor time, adjust
+                    if student_base_ratio > professor_base_ratio:
+                        professor_ratio = max(0, 100 - student_base_ratio)
+                        student_ratio = student_base_ratio
+                    else:
+                        professor_ratio = professor_base_ratio
+                        student_ratio = student_base_ratio
+                        # Remaining time (silence/other) goes to professor
+                        remaining = 100 - (professor_ratio + student_ratio)
+                        if remaining > 0:
+                            professor_ratio += remaining
+                    
+                    # Normalize to ensure they add up to 100%
+                    total_ratio = professor_ratio + student_ratio
+                    if total_ratio > 0:
+                        professor_ratio = (professor_ratio / total_ratio) * 100
+                        student_ratio = (student_ratio / total_ratio) * 100
+                    
+                    print(f"✓ Talk time ratio calculated: Professor={professor_ratio:.1f}%, Students={student_ratio:.1f}% (prof_sec={prof_seconds:.1f}, student_sec={student_talk_time_seconds:.1f}, total_sec={total_seconds})")
+                else:
+                    print(f"⚠ Cannot calculate talk time ratio: total_seconds={total_seconds}")
+            except Exception as e:
+                print(f"⚠ Error calculating talk time ratios: {e}")
+                import traceback
+                traceback.print_exc()
                 pass
 
             # Participation rate snapshot
@@ -227,16 +360,13 @@ async def get_lecture_attendance(lecture_id: str):
         "student_id, checked_in_at"
     ).eq("lecture_id", lecture_id).execute()
     
-    if not attendance_result.data:
-        return {"students": [], "total_present": 0}
-    
     # Get student details
-    student_ids = [a["student_id"] for a in attendance_result.data]
-    students_result = supabase.table("users").select("user_id, email").in_("user_id", student_ids).execute()
+    student_ids = [a["student_id"] for a in attendance_result.data] if attendance_result.data else []
+    students_result = supabase.table("users").select("user_id, email").in_("user_id", student_ids).execute() if student_ids else type("obj", (), {"data": []})()
     
     # Get participation counts for each student
     students_with_data = []
-    for attendance in attendance_result.data:
+    for attendance in attendance_result.data or []:
         student_id = attendance["student_id"]
         student_info = next((s for s in students_result.data if s["user_id"] == student_id), None)
         
@@ -282,6 +412,22 @@ async def get_lecture_attendance(lecture_id: str):
                 "lastActive": last_active_str,
                 "checked_in_at": attendance["checked_in_at"]
             })
+
+    # Append demo dummy students so the professor sees participants during the demo
+    try:
+        from app.routes.students import _DUMMY_STUDENTS  # reuse demo list
+        for d in _DUMMY_STUDENTS:
+            students_with_data.append({
+                "id": d["student_id"],
+                "name": d["email"].split("@")[0],
+                "email": d["email"],
+                "present": True,
+                "participated": 0,
+                "lastActive": "Just now",
+                "checked_in_at": datetime.utcnow().isoformat() + "Z"
+            })
+    except Exception:
+        pass
     
     return {
         "students": students_with_data,

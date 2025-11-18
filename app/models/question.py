@@ -41,6 +41,7 @@ class QuestionCreate(BaseModel):
     option_c: Optional[str] = None
     option_d: Optional[str] = None
     correct_answer: Optional[Literal["a", "b", "c", "d"]] = None
+    slide_content: Optional[str] = None  # PowerPoint/slide content for better context
 
 
 class QuestionResponse(BaseModel):

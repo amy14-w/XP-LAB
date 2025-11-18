@@ -27,10 +27,15 @@ const Leaderboard = () => {
         // Auto-select first class if available
         if (studentClasses && studentClasses.length > 0) {
           setSelectedClass(studentClasses[0].class_id);
+        } else {
+          // No classes yet – fall back to global leaderboard for demo
+          setSelectedClass('global');
         }
       } catch (error) {
         console.error('Failed to fetch classes:', error);
         setClasses([]);
+        // Fallback to global leaderboard in error case as well
+        setSelectedClass('global');
       } finally {
         setClassesLoading(false);
       }
@@ -46,7 +51,10 @@ const Leaderboard = () => {
       
       try {
         setLoading(true);
-        const leaderboard = await studentsAPI.getLeaderboard(selectedClass, user.user_id);
+        const leaderboard = await studentsAPI.getLeaderboard(
+          selectedClass === 'global' ? null : selectedClass,
+          user.user_id
+        );
         
         // Transform backend data to match frontend format
         const transformed = (leaderboard || []).map((student, index) => ({
@@ -168,7 +176,7 @@ const Leaderboard = () => {
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-3xl font-bold flex items-center gap-3">
                 <Trophy className="text-yellow-400" size={36} />
-                Class Leaderboard
+                {selectedClass === 'global' ? 'Global Leaderboard' : 'Class Leaderboard'}
               </h2>
               {classesLoading ? (
                 <div className="text-slate-400">Loading classes...</div>
@@ -178,6 +186,7 @@ const Leaderboard = () => {
                   onChange={(e) => setSelectedClass(e.target.value)}
                   className="px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white"
                 >
+                  <option value="global">Global (All Students)</option>
                   {classes.map(cls => (
                     <option key={cls.class_id} value={cls.class_id}>
                       {cls.name}
@@ -185,19 +194,11 @@ const Leaderboard = () => {
                   ))}
                 </select>
               ) : (
-                <div className="text-red-400 text-sm">
-                  You must join a class first to see the leaderboard
-                </div>
+                <div className="text-slate-400 text-sm">Showing Global Leaderboard (no classes joined yet)</div>
               )}
             </div>
 
-            {!selectedClass && classes.length === 0 ? (
-              <div className="text-center py-12 text-slate-400">
-                <Trophy size={48} className="mx-auto mb-4 opacity-50" />
-                <p className="text-lg mb-2">You haven't joined any classes yet.</p>
-                <p className="text-sm">Check into a lecture using a lecture code to join a class and see the leaderboard.</p>
-              </div>
-            ) : loading ? (
+            {loading ? (
               <div className="text-center py-12 text-slate-400">Loading leaderboard...</div>
             ) : leaderboardData.length === 0 ? (
               <div className="text-center py-12 text-slate-400">No leaderboard data available yet for this class.</div>

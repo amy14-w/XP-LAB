@@ -99,17 +99,58 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
             print(f"⚠ Error parsing datetime {dt_str}: {e}")
             return None
     
-    # Calculate duration
+    # Calculate duration - try multiple methods for reliability
     duration_minutes = 0
-    if start_time and end_time:
+    
+    # First, try to get duration_minutes directly from lectures table (saved during end_lecture)
+    try:
+        lecture_check = supabase.table("lectures").select("duration_minutes, start_time, end_time").eq("lecture_id", lecture_id).execute()
+        print(f"🔍 Analytics duration lookup: lecture_check.data={lecture_check.data}")
+        if lecture_check.data:
+            db_duration = lecture_check.data[0].get("duration_minutes")
+            print(f"🔍 DB duration_minutes value: {db_duration} (type: {type(db_duration)})")
+            if db_duration is not None:
+                duration_minutes = int(db_duration) if db_duration is not None else 0
+                if duration_minutes > 0:
+                    print(f"✓ Using duration_minutes from lectures table: {duration_minutes} minutes")
+                else:
+                    print(f"⚠ duration_minutes in DB is 0 or None for lecture {lecture_id}")
+            else:
+                print(f"⚠ duration_minutes is None in database for lecture {lecture_id}")
+        else:
+            print(f"⚠ Could not find lecture {lecture_id} in database")
+    except Exception as e:
+        print(f"⚠ Could not get duration_minutes from lectures table: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    # Fallback: try to get from lecture_reports table
+    if duration_minutes == 0:
+        try:
+            report_check = supabase.table("lecture_reports").select("duration_minutes").eq("lecture_id", lecture_id).execute()
+            if report_check.data and report_check.data[0].get("duration_minutes") is not None:
+                duration_minutes = int(report_check.data[0].get("duration_minutes", 0))
+                if duration_minutes > 0:
+                    print(f"✓ Using duration_minutes from lecture_reports table: {duration_minutes} minutes")
+        except Exception as e:
+            print(f"⚠ Could not get duration_minutes from lecture_reports table: {e}")
+    
+    # Last resort: calculate from start_time and end_time
+    if duration_minutes == 0 and start_time and end_time:
         try:
             start_dt = parse_datetime(start_time)
             end_dt = parse_datetime(end_time)
             if start_dt and end_dt:
                 duration_seconds = (end_dt - start_dt).total_seconds()
-                duration_minutes = int(duration_seconds / 60)
+                duration_minutes = max(0, int(duration_seconds / 60))
+                if duration_minutes > 0:
+                    print(f"✓ Calculated duration from start_time/end_time: {duration_minutes} minutes ({duration_seconds:.1f} seconds)")
+                else:
+                    print(f"⚠ Calculated duration is 0 or negative: {duration_seconds:.1f} seconds")
         except Exception as e:
-            print(f"⚠ Error calculating duration: {e}")
+            print(f"⚠ Error calculating duration from start_time/end_time: {e}")
+            import traceback
+            traceback.print_exc()
             duration_minutes = 0
     
     # Format date
@@ -344,7 +385,10 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
         estimated_question_time = untracked_questions * 5  # 5 seconds per untracked question
         student_talk_time_seconds += estimated_question_time
     
-    # Calculate talk time ratio
+    # Calculate talk time ratio - use real data, only fallback to defaults if absolutely necessary
+    professor_ratio = None
+    student_ratio = None
+    
     if duration_minutes > 0:
         total_seconds = duration_minutes * 60
         
@@ -356,6 +400,8 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
             # Calculate base ratios
             professor_base_ratio = min((professor_talk_time_seconds / total_seconds) * 100, 100)
             student_base_ratio = min((student_talk_time_seconds / total_seconds) * 100, 100)
+            
+            print(f"📊 Talk time calculation: prof_sec={professor_talk_time_seconds:.1f}, student_sec={student_talk_time_seconds:.1f}, total_sec={total_seconds}, prof_base={professor_base_ratio:.1f}%, student_base={student_base_ratio:.1f}%")
             
             # If student time (questions) exceeds professor time, adjust
             # This can happen if many questions were asked
@@ -383,10 +429,16 @@ async def get_lecture_analytics(lecture_id: str, professor_id: str = Query(...))
             if total_ratio > 0:
                 professor_ratio = (professor_ratio / total_ratio) * 100
                 student_ratio = (student_ratio / total_ratio) * 100
+            
+            print(f"✓ Final talk time ratio: Professor={professor_ratio:.1f}%, Students={student_ratio:.1f}%")
         else:
+            print(f"⚠ total_seconds is 0, cannot calculate talk time ratio")
+            # Only use fallback if we truly cannot calculate
             professor_ratio = 68
             student_ratio = 32
     else:
+        print(f"⚠ duration_minutes is 0, cannot calculate talk time ratio (using fallback 68/32)")
+        # Only use fallback if duration is truly unavailable
         professor_ratio = 68
         student_ratio = 32
     

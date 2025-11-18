@@ -218,8 +218,9 @@ export const analyticsAPI = {
 
 // Questions API
 export const questionsAPI = {
-  create: async (lectureId, mode, questionData) => {
-    return await apiRequest('/questions', {
+  create: async (lectureId, mode, questionData, professorId) => {
+    const query = professorId ? `?professor_id=${professorId}` : '';
+    return await apiRequest(`/questions${query}`, {
       method: 'POST',
       body: JSON.stringify({ lecture_id: lectureId, mode, ...questionData }),
     });

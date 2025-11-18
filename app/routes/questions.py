@@ -22,11 +22,14 @@ async def create_question(question_data: QuestionCreate, professor_id: str):
     question_id = str(uuid4())
     lecture_id = question_data.lecture_id
     
-    # Get recent lecture transcript for context
+    # Get recent lecture transcript for context (fallback)
     from app.websockets.audio_handler import lecture_transcripts
     lecture_context = lecture_transcripts.get(lecture_id, "Recent lecture content...")
     if len(lecture_context) > 2000:
         lecture_context = lecture_context[-2000:]  # Last 2000 chars
+    
+    # Get slide content if provided (from frontend - PowerPoint material)
+    slide_content = getattr(question_data, 'slide_content', None) or ""
     
     question_text = question_data.question_text
     option_a = question_data.option_a
@@ -36,8 +39,8 @@ async def create_question(question_data: QuestionCreate, professor_id: str):
     correct_answer = question_data.correct_answer
     
     if question_data.mode == QuestionMode.AI_FULL:
-        # AI generates everything
-        ai_result = await generate_question_full(lecture_context)
+        # AI generates everything - prioritize slide content over transcript
+        ai_result = await generate_question_full(lecture_context, slide_content=slide_content)
         question_text = ai_result["question_text"]
         option_a = ai_result["option_a"]
         option_b = ai_result["option_b"]

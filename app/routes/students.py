@@ -5,6 +5,50 @@ from app.utils.rank_calculator import calculate_rank
 
 router = APIRouter()
 
+# Demo: dummy students to showcase leaderboard alongside real users
+_DUMMY_STUDENTS = [
+    {
+        "student_id": "dummy-alex-johnson",
+        "email": "alex.johnson@demo.edu",
+        "total_points": 980,
+        "rank": "gold",
+        "current_streak": 5,
+        "longest_streak": 12,
+    },
+    {
+        "student_id": "dummy-brianna-lee",
+        "email": "brianna.lee@demo.edu",
+        "total_points": 1240,
+        "rank": "platinum",
+        "current_streak": 8,
+        "longest_streak": 20,
+    },
+    {
+        "student_id": "dummy-carlos-martinez",
+        "email": "carlos.martinez@demo.edu",
+        "total_points": 760,
+        "rank": "silver",
+        "current_streak": 3,
+        "longest_streak": 9,
+    },
+    {
+        "student_id": "dummy-diana-ngo",
+        "email": "diana.ngo@demo.edu",
+        "total_points": 1520,
+        "rank": "diamond",
+        "current_streak": 11,
+        "longest_streak": 24,
+    },
+    {
+        "student_id": "dummy-ethan-wright",
+        "email": "ethan.wright@demo.edu",
+        "total_points": 430,
+        "rank": "silver",
+        "current_streak": 1,
+        "longest_streak": 5,
+    },
+]
+
 
 @router.get("/{student_id}/profile")
 async def get_student_profile(student_id: str):
@@ -99,6 +143,20 @@ async def get_leaderboard(student_id: str, class_id: str = None):
                 "longest_streak": streak.get("longest_streak", 0)
             })
         
+        # Merge in dummy students for demo
+        # Note: class-specific streaks are unknown for dummies; keep their provided streaks
+        leaderboard.extend([
+            {
+                "student_id": d["student_id"],
+                "email": d["email"],
+                "total_points": d["total_points"],
+                "rank": d["rank"],
+                "current_streak": d.get("current_streak", 0),
+                "longest_streak": d.get("longest_streak", 0),
+            }
+            for d in _DUMMY_STUDENTS
+        ])
+        
         # Sort by points
         leaderboard.sort(key=lambda x: x["total_points"], reverse=True)
         return leaderboard
@@ -106,7 +164,18 @@ async def get_leaderboard(student_id: str, class_id: str = None):
         # Global leaderboard (all students)
         result = supabase.table("student_profiles").select("*").order("total_points", desc=True).limit(100).execute()
         if not result.data:
-            return []
+            # If no real students yet, return just the dummies
+            return [
+                {
+                    "student_id": d["student_id"],
+                    "email": d["email"],
+                    "total_points": d["total_points"],
+                    "rank": d["rank"],
+                    "current_streak": d.get("current_streak", 0),
+                    "longest_streak": d.get("longest_streak", 0),
+                }
+                for d in sorted(_DUMMY_STUDENTS, key=lambda x: x["total_points"], reverse=True)
+            ]
         
         # Get user emails
         student_ids = [p["student_id"] for p in result.data]
@@ -126,7 +195,22 @@ async def get_leaderboard(student_id: str, class_id: str = None):
                 "longest_streak": 0
             })
         
-        return leaderboard
+        # Merge in dummy students for demo
+        leaderboard.extend([
+            {
+                "student_id": d["student_id"],
+                "email": d["email"],
+                "total_points": d["total_points"],
+                "rank": d["rank"],
+                "current_streak": d.get("current_streak", 0),
+                "longest_streak": d.get("longest_streak", 0),
+            }
+            for d in _DUMMY_STUDENTS
+        ])
+        
+        # Sort by points and cap to 100
+        leaderboard.sort(key=lambda x: x["total_points"], reverse=True)
+        return leaderboard[:100]
 
 
 @router.get("/{student_id}/classes")
@@ -276,6 +360,25 @@ async def get_class_students(class_id: str, professor_id: str):
             "badges": badges
         })
     
+    # Append dummy students for demo in professor view
+    for d in _DUMMY_STUDENTS:
+        students_data.append({
+            "id": d["student_id"],
+            "name": d["email"].split("@")[0],
+            "email": d["email"],
+            "class_id": class_id,
+            "class_name": class_result.data[0]["name"],
+            "points": d.get("total_points", 0),
+            "rank": d.get("rank", "bronze"),
+            "streak": d.get("current_streak", 0),
+            "attendance": 100,
+            "participation_rate": 0,
+            "avg_quiz_score": 0,
+            "badges": []
+        })
+
+    # Sort by points desc for consistency
+    students_data.sort(key=lambda s: s.get("points", 0), reverse=True)
     return students_data
 
 
@@ -285,7 +388,24 @@ async def get_professor_students(professor_id: str):
     # Get all classes for professor
     classes_result = supabase.table("classes").select("class_id, name").eq("professor_id", professor_id).execute()
     if not classes_result.data:
-        return []
+        # No real classes yet; return dummy students bound to a demo class
+        return [
+            {
+                "id": d["student_id"],
+                "name": d["email"].split("@")[0],
+                "email": d["email"],
+                "class_id": "demo-class",
+                "class_name": "Demo Class",
+                "points": d.get("total_points", 0),
+                "rank": d.get("rank", "bronze"),
+                "streak": d.get("current_streak", 0),
+                "attendance": 100,
+                "participation_rate": 0,
+                "avg_quiz_score": 0,
+                "badges": []
+            }
+            for d in _DUMMY_STUDENTS
+        ]
     
     all_students = {}
     for class_data in classes_result.data:
@@ -312,7 +432,30 @@ async def get_professor_students(professor_id: str):
                 if class_name not in existing.get("classes", []):
                     existing.setdefault("classes", []).append(class_name)
     
-    return list(all_students.values())
+    # If still empty (e.g., no attendees), append demo students tied to the first class
+    if not all_students and classes_result.data:
+        first_class = classes_result.data[0]
+        for d in _DUMMY_STUDENTS:
+            all_students[d["student_id"]] = {
+                "id": d["student_id"],
+                "name": d["email"].split("@")[0],
+                "email": d["email"],
+                "class_id": first_class["class_id"],
+                "class_name": first_class["name"],
+                "points": d.get("total_points", 0),
+                "rank": d.get("rank", "bronze"),
+                "streak": d.get("current_streak", 0),
+                "attendance": 100,
+                "participation_rate": 0,
+                "avg_quiz_score": 0,
+                "badges": [],
+                "classes": [first_class["name"]],
+            }
+
+    # Sort by points desc for consistency
+    students_list = list(all_students.values())
+    students_list.sort(key=lambda s: s.get("points", 0), reverse=True)
+    return students_list
 
 
 @router.get("/{student_id}/badges")

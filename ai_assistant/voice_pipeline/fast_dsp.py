@@ -69,7 +69,9 @@ def analyze_pitch_variation(audio_data: np.ndarray, sr: int = 22050) -> Dict:
         # Monotone score: 0 = very varied, 1 = monotone
         # Normalize variance (typical speaking range ~200-400 Hz)
         # Lower variance = more monotone
-        normalized_variance = min(pitch_variance / 1000.0, 1.0)  # Scale to 0-1
+        # Use 800 as divisor (more lenient than 1000) to make it easier to reach good scores
+        # Decent speakers should easily reach green zone (70%+)
+        normalized_variance = min(pitch_variance / 800.0, 1.0)  # Scale to 0-1 (lenient - easy to score well)
         monotone_score = 1.0 - normalized_variance
         
         return {
@@ -151,6 +153,7 @@ def calculate_filler_rate(transcript: str) -> Dict:
     Calculate filler word rate from transcript using regex.
     
     Common fillers: um, uh, like, you know, so, well, actually, basically, kind of
+    Plus: ah, eh, oh, hmm, repetitions, word fragments
     
     Args:
         transcript: Text transcript (from Whisper)
@@ -161,52 +164,102 @@ def calculate_filler_rate(transcript: str) -> Dict:
         - filler_rate: Fillers per word (0-1)
         - filler_words: List of found filler words
         - total_words: Total word count
+        - repetition_penalty: Extra penalty for repeated words (like "like like like")
+        - fragment_penalty: Extra penalty for word fragments (words ending with -)
     """
     if not transcript or not transcript.strip():
         return {
             'filler_count': 0,
             'filler_rate': 0.0,
             'filler_words': [],
-            'total_words': 0
+            'total_words': 0,
+            'repetition_penalty': 0.0,
+            'fragment_penalty': 0.0
         }
     
-    # Common filler words/phrases (case-insensitive)
-    fillers = [
-        r'\bum\b',
-        r'\buh\b',
-        r'\blike\b',
-        r'\byou know\b',
-        r'\bso\b',
-        r'\bwell\b',
-        r'\bactually\b',
-        r'\bbasically\b',
-        r'\bkind of\b',
-        r'\bsort of\b',
-        r'\ber\b',
-        r'\berm\b',
-        r'\buhm\b',
-        r'\buhh\b'
-    ]
-    
+    # Normalize transcript: lowercase and keep word tokens
     transcript_lower = transcript.lower()
-    total_words = len(transcript.split())
+    # Tokenize words (handles punctuation better than split())
+    tokens = re.findall(r"[a-zA-Z'-]+", transcript_lower)  # Include - for fragments
+    total_words = len([t for t in tokens if not t.endswith('-')])  # Count non-fragments as words
+
+    # Expanded filler words/phrases (robust variants, case-insensitive)
+    # Allow repeated letters (um/umm/ummm, uh/uhh...), optional surrounding punctuation handled by tokenization
+    fillers = [
+        r'\bum+m+\b',           # um, umm, ummm
+        r'\bum\b',              # um
+        r'\buh+h+\b',           # uhh, uhhh
+        r'\buh\b',              # uh
+        r'\ber+m+\b',           # erm, errm
+        r'\ber\b',              # er
+        r"\buhm+\b",            # uhm, uhmm
+        r'\bah+h+\b',           # ah, ahh, ahhh
+        r'\bah\b',              # ah
+        r'\beh+h+\b',           # eh, ehh, ehhh
+        r'\beh\b',              # eh
+        r'\boh+h+\b',           # oh, ohh, ohhh
+        r'\boh\b',              # oh
+        r'\bhm+m+\b',           # hmm, hmmm
+        r'\bhm\b',              # hm
+        r'\bmhm\b',             # mhm
+        r'\buh\s*huh\b',        # uh huh
+        r'\buh\s*uh\b',         # uh uh (repetition)
+        r'\bah\s*ha\b',         # ah ha
+        r'\btsk\b',             # tsk
+        r'\bahem\b',            # ahem
+        r'\blike\b',            # like
+        r'\byou\s+know\b',      # you know
+        r'\bso+\b',             # so (elongated)
+        r'\bwell+\b',           # well
+        r'\bactually\b',        # actually
+        r'\bbasically\b',       # basically
+        r'\bkind\s+of\b',       # kind of
+        r'\bsort\s+of\b',       # sort of
+        r'\bi\s+mean\b',        # i mean
+        r'\byou\s+see\b',       # you see
+        r'\bright\b',           # right (as filler)
+        r'\bokay\b',            # okay (as filler, context dependent but common)
+        r'\bok\b',              # ok (as filler)
+    ]
     
     filler_count = 0
     found_fillers = []
     
+    text_for_regex = " ".join(tokens)
     for filler_pattern in fillers:
-        matches = re.findall(filler_pattern, transcript_lower, re.IGNORECASE)
+        matches = re.findall(filler_pattern, text_for_regex, re.IGNORECASE)
         filler_count += len(matches)
         if matches:
             found_fillers.extend(matches)
     
-    filler_rate = filler_count / total_words if total_words > 0 else 0.0
+    # Detect repetitions (like "like like like" = unclear speech)
+    repetition_penalty = 0.0
+    words_list = tokens
+    for i in range(len(words_list) - 2):
+        if words_list[i] == words_list[i+1] == words_list[i+2]:
+            # Triple repetition detected
+            repetition_penalty += 0.05  # Add 5% penalty per triple repetition
+        elif words_list[i] == words_list[i+1] and words_list[i] in ['like', 'so', 'well', 'you', 'know', 'um', 'uh', 'ah', 'eh', 'oh']:
+            # Double repetition of common fillers
+            repetition_penalty += 0.02  # Add 2% penalty per double filler repetition
+    
+    # Detect word fragments (words ending with - indicate incomplete thoughts)
+    fragment_count = sum(1 for token in tokens if token.endswith('-') and len(token) > 1)
+    fragment_penalty = min(fragment_count * 0.03, 0.15) if total_words > 0 else 0.0  # Max 15% penalty
+    
+    # Base filler rate
+    base_filler_rate = filler_count / total_words if total_words > 0 else 0.0
+    
+    # Combine with penalties (capped at 1.0)
+    filler_rate = min(base_filler_rate + repetition_penalty + fragment_penalty, 1.0)
     
     return {
         'filler_count': filler_count,
         'filler_rate': float(filler_rate),
         'filler_words': list(set(found_fillers)),  # Unique fillers
-        'total_words': total_words
+        'total_words': total_words,
+        'repetition_penalty': float(repetition_penalty),
+        'fragment_penalty': float(fragment_penalty)
     }
 
 

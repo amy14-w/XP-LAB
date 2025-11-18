@@ -40,6 +40,11 @@ lecture_talk_time: Dict[str, float] = {}  # lecture_id -> total talk time in sec
 voice_pipelines: Dict[str, VoicePipelineManager] = {}  # lecture_id -> VoicePipelineManager
 voice_pipeline_executors: Dict[str, ThreadPoolExecutor] = {}  # lecture_id -> ThreadPoolExecutor
 
+# Persist last-known clarity/pace between transcript batches for stable UI
+last_clarity: Dict[str, float] = {}  # lecture_id -> clarity (0-100)
+last_pace: Dict[str, float] = {}     # lecture_id -> pace (0-100)
+last_pitch: Dict[str, float] = {}    # lecture_id -> pitch (0-100)
+EMA_ALPHA = 0.4  # smoothing factor
 # Transcription batching (EXACT same as test_mic_realtime.py)
 transcription_buffers: Dict[str, list] = {}  # lecture_id -> list of audio chunks
 batch_chunk_indices: Dict[str, list] = {}  # lecture_id -> list of chunk indices
@@ -353,21 +358,71 @@ def map_ai_metrics_to_frontend(metrics: Dict) -> Dict:
     energy_metrics = metrics.get('energy', {})
     filler_metrics = metrics.get('filler', {})
     wpm_metrics = metrics.get('wpm', {})
+    duration_seconds = metrics.get('duration_seconds', 0.0)
     
     # Volume: Energy (RMS) normalized to 0-100%
     # Energy normalized is already 0-1, multiply by 100
     energy_normalized = energy_metrics.get('energy_normalized', 0.0)
     volume = min(max(energy_normalized * 100, 0), 100)
     
-    # Clarity: Inverse of filler rate (less fillers = more clarity)
-    # Filler rate 0 = 100% clarity, filler rate 1 = 0% clarity
+    # Clarity: Enhanced calculation with multiple factors
+    # 1. Base filler rate (with steeper penalty curve)
     filler_rate = filler_metrics.get('filler_rate', 0.0)
-    clarity = min(max((1.0 - filler_rate) * 100, 0), 100)
+    # Apply squared penalty: filler_rate 0.1 -> clarity drops to ~90% instead of 90%
+    # This makes small filler rates more noticeable
+    base_clarity = 100 * ((1.0 - filler_rate) ** 1.5)  # 1.5 power makes it steeper than linear
+    
+    # 2. Intelligibility penalty: if transcript is very short relative to audio duration
+    total_words = filler_metrics.get('total_words', 0)
+    intelligibility_penalty = 0.0
+    if duration_seconds > 0 and total_words > 0:
+        words_per_second = total_words / duration_seconds
+        # Normal speech is ~2-3 words/second; below 1 word/second suggests lots of silence/unclear speech
+        if words_per_second < 1.0:
+            # Penalize clarity: if speaking rate is very low, speech is likely unclear
+            intelligibility_penalty = (1.0 - words_per_second) * 20  # Max 20% penalty
+        elif words_per_second < 1.5:
+            # Moderate penalty for slow speech
+            intelligibility_penalty = (1.5 - words_per_second) * 10  # Max 5% penalty
+    
+    # 3. Pause detection: if word timestamps available, detect long gaps
+    pause_penalty = 0.0
+    word_timestamps = wpm_metrics.get('word_timestamps')  # May not always be available
+    if word_timestamps and len(word_timestamps) > 1:
+        # Calculate gaps between words
+        gaps = []
+        for i in range(len(word_timestamps) - 1):
+            current_end = word_timestamps[i].get('end', 0)
+            next_start = word_timestamps[i + 1].get('start', 0)
+            if next_start > current_end:
+                gap = next_start - current_end
+                gaps.append(gap)
+        
+        if gaps:
+            avg_gap = sum(gaps) / len(gaps)
+            # Normal gap is ~0.2-0.3s; gaps > 0.5s indicate hesitations
+            if avg_gap > 0.5:
+                # Penalize for long average gaps (hesitation = unclear)
+                pause_penalty = min((avg_gap - 0.5) * 15, 15)  # Max 15% penalty for very long gaps
+    
+    # 4. Pace consistency penalty: if pace is very low or highly variable, speech may be unclear
+    wpm = wpm_metrics.get('wpm', 0)
+    pace_consistency_penalty = 0.0
+    if wpm > 0:
+        # Very slow speech (< 100 WPM) suggests unclear/difficult speech
+        if wpm < 100:
+            pace_consistency_penalty = (100 - wpm) * 0.3  # Max ~15% penalty for very slow speech
+        # Very fast speech (> 250 WPM) may be unclear/mumbling
+        elif wpm > 250:
+            pace_consistency_penalty = (wpm - 250) * 0.2  # Max ~10% penalty for very fast speech
+    
+    # Combine all clarity factors
+    clarity = base_clarity - intelligibility_penalty - pause_penalty - pace_consistency_penalty
+    clarity = min(max(clarity, 0), 100)
     
     # Pace: Normalize WPM to 0-100% (optimal around 150 WPM)
     # Too slow (< 120) or too fast (> 200) = lower score
     # Optimal range: 120-180 WPM = 70-100%
-    wpm = wpm_metrics.get('wpm', 0)
     if wpm == 0:
         pace = 0
     elif wpm < 120:
@@ -691,6 +746,36 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
             # This matches test_mic_realtime.py behavior - metrics are sent as soon as available
             try:
                 frontend_metrics = map_ai_metrics_to_frontend(metrics)
+                # Stabilize clarity when transcript is empty; apply EMA smoothing
+                filler_info = metrics.get('filler', {}) if isinstance(metrics, dict) else {}
+                total_words = filler_info.get('total_words', 0)
+                if total_words == 0 and lecture_id in last_clarity:
+                    frontend_metrics['clarity'] = last_clarity[lecture_id]
+                else:
+                    prev_c = last_clarity.get(lecture_id, frontend_metrics['clarity'])
+                    smoothed_c = EMA_ALPHA * frontend_metrics['clarity'] + (1 - EMA_ALPHA) * prev_c
+                    last_clarity[lecture_id] = round(max(0.0, min(100.0, smoothed_c)), 1)
+                    frontend_metrics['clarity'] = last_clarity[lecture_id]
+                
+                # Stabilize pace when WPM = 0 between batches; apply EMA smoothing, clamp to a small floor
+                wpm_info = metrics.get('wpm', {}) if isinstance(metrics, dict) else {}
+                wpm_val = wpm_info.get('wpm', 0)
+                if (not wpm_val) and lecture_id in last_pace:
+                    frontend_metrics['pace'] = last_pace[lecture_id]
+                else:
+                    prev_p = last_pace.get(lecture_id, frontend_metrics['pace'])
+                    smoothed_p = EMA_ALPHA * frontend_metrics['pace'] + (1 - EMA_ALPHA) * prev_p
+                    smoothed_p = max(10.0, smoothed_p)  # avoid dropping to 0
+                    last_pace[lecture_id] = round(min(100.0, smoothed_p), 1)
+                    frontend_metrics['pace'] = last_pace[lecture_id]
+                
+                # Stabilize pitch variation; apply EMA smoothing (very light smoothing - preserves responsiveness)
+                PITCH_EMA_ALPHA = 0.65  # Very light smoothing (65% new, 35% old - preserves responsiveness)
+                prev_pitch = last_pitch.get(lecture_id, frontend_metrics['pitch'])
+                smoothed_pitch = PITCH_EMA_ALPHA * frontend_metrics['pitch'] + (1 - PITCH_EMA_ALPHA) * prev_pitch
+                smoothed_pitch = max(0.0, min(100.0, smoothed_pitch))  # Clamp to 0-100
+                last_pitch[lecture_id] = round(smoothed_pitch, 1)
+                frontend_metrics['pitch'] = last_pitch[lecture_id]
                 try:
                     await websocket.send_json({
                         "type": "voice_metrics",
@@ -797,6 +882,35 @@ async def audio_websocket_handler(websocket: WebSocket, lecture_id: str, profess
                                 
                                 # Re-send updated metrics to frontend (with filler_rate and WPM now included)
                                 frontend_metrics = map_ai_metrics_to_frontend(metric)
+                                # Apply same stabilization and smoothing on batch updates
+                                filler_info2 = metric.get('filler', {})
+                                total_words2 = filler_info2.get('total_words', 0)
+                                if total_words2 == 0 and lecture_id in last_clarity:
+                                    frontend_metrics['clarity'] = last_clarity[lecture_id]
+                                else:
+                                    prev_c2 = last_clarity.get(lecture_id, frontend_metrics['clarity'])
+                                    smoothed_c2 = EMA_ALPHA * frontend_metrics['clarity'] + (1 - EMA_ALPHA) * prev_c2
+                                    last_clarity[lecture_id] = round(max(0.0, min(100.0, smoothed_c2)), 1)
+                                    frontend_metrics['clarity'] = last_clarity[lecture_id]
+
+                                wpm_info2 = metric.get('wpm', {})
+                                wpm_val2 = wpm_info2.get('wpm', 0)
+                                if (not wpm_val2) and lecture_id in last_pace:
+                                    frontend_metrics['pace'] = last_pace[lecture_id]
+                                else:
+                                    prev_p2 = last_pace.get(lecture_id, frontend_metrics['pace'])
+                                    smoothed_p2 = EMA_ALPHA * frontend_metrics['pace'] + (1 - EMA_ALPHA) * prev_p2
+                                    smoothed_p2 = max(10.0, smoothed_p2)
+                                    last_pace[lecture_id] = round(min(100.0, smoothed_p2), 1)
+                                    frontend_metrics['pace'] = last_pace[lecture_id]
+                                
+                                # Stabilize pitch variation on batch updates (very light smoothing - preserves responsiveness)
+                                PITCH_EMA_ALPHA2 = 0.65  # Very light smoothing (65% new, 35% old - preserves responsiveness)
+                                prev_pitch2 = last_pitch.get(lecture_id, frontend_metrics['pitch'])
+                                smoothed_pitch2 = PITCH_EMA_ALPHA2 * frontend_metrics['pitch'] + (1 - PITCH_EMA_ALPHA2) * prev_pitch2
+                                smoothed_pitch2 = max(0.0, min(100.0, smoothed_pitch2))  # Clamp to 0-100
+                                last_pitch[lecture_id] = round(smoothed_pitch2, 1)
+                                frontend_metrics['pitch'] = last_pitch[lecture_id]
                                 try:
                                     await websocket.send_json({
                                         "type": "voice_metrics",

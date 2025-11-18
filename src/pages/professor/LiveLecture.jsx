@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { X, Mic, MicOff, Users, Clock, AlertCircle, Lightbulb, CheckCircle, TrendingUp, TrendingDown, Volume2, Wifi, ChevronLeft, ChevronRight, Maximize2, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
-import { lecturesAPI, classesAPI } from '../../services/api';
+import { lecturesAPI, classesAPI, questionsAPI } from '../../services/api';
 
 const LiveLecture = () => {
   const navigate = useNavigate();
@@ -58,6 +58,11 @@ const LiveLecture = () => {
   
   // Sidebar state for mobile responsiveness
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Quick comprehension check state
+  const [comprehensionQuestion, setComprehensionQuestion] = useState(null);
+  const [isGeneratingQuestion, setIsGeneratingQuestion] = useState(false);
+  const [showQuestionModal, setShowQuestionModal] = useState(false);
 
   // Default slides - Binary Search Trees
   const defaultSlides = [
@@ -388,13 +393,20 @@ const LiveLecture = () => {
           if (data.type === 'voice_metrics' && data.metrics) {
             console.log('✅ Updating voice metrics:', data.metrics);
             setVoiceMetrics(prev => {
-              // Smooth transition - only update if values changed significantly
-              const newMetrics = { ...data.metrics };
-              // Ensure all values are numbers
-              Object.keys(newMetrics).forEach(key => {
-                newMetrics[key] = typeof newMetrics[key] === 'number' ? newMetrics[key] : parseFloat(newMetrics[key]) || 0;
+              const incoming = data.metrics || {};
+              const merged = { ...prev };
+
+              // Only overwrite a field if a valid numeric value is provided.
+              // If a field is missing/undefined/NaN, keep the previous value (pause at last value).
+              ['clarity', 'pace', 'pitch', 'volume'].forEach(key => {
+                const raw = incoming[key];
+                const candidate = typeof raw === 'number' ? raw : (raw != null ? parseFloat(raw) : NaN);
+                if (!Number.isNaN(candidate)) {
+                  merged[key] = candidate;
+                }
               });
-              return newMetrics;
+
+              return merged;
             });
           }
           
@@ -705,6 +717,84 @@ const LiveLecture = () => {
 
   const toggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
+  };
+
+  // Extract lecture content from slides for AI question generation
+  const extractLectureContent = () => {
+    // Get content from all slides up to current slide (include current)
+    const slidesToUse = slides.slice(0, currentSlide + 1);
+    let content = '';
+    
+    slidesToUse.forEach((slide, idx) => {
+      if (slide.type === 'title') {
+        content += `\n\nSlide ${idx + 1}: ${slide.title}\n${slide.subtitle || ''}\n${slide.content || ''}`;
+      } else if (slide.type === 'content') {
+        content += `\n\nSlide ${idx + 1}: ${slide.title || ''}`;
+        if (slide.points) {
+          content += '\n' + slide.points.join('\n');
+        }
+        if (slide.code) {
+          content += '\n\nCode:\n' + slide.code;
+        }
+      } else if (slide.type === 'quiz') {
+        content += `\n\nSlide ${idx + 1}: Quiz Question\n${slide.question}`;
+      }
+    });
+    
+    return content.trim();
+  };
+
+  // Handle quick comprehension check button click
+  const handleQuickComprehensionCheck = async () => {
+    // Prevent multiple simultaneous questions
+    if (isGeneratingQuestion || comprehensionQuestion) {
+      console.log('Question already active, please wait...');
+      return;
+    }
+
+    if (!lectureId || !user?.user_id) {
+      console.error('Missing lecture ID or user ID');
+      return;
+    }
+
+    setIsGeneratingQuestion(true);
+
+    try {
+      // Extract lecture content from slides
+      const lectureContent = extractLectureContent();
+      
+      if (!lectureContent || lectureContent.length < 50) {
+        alert('Not enough lecture content available. Please ensure you have slides loaded.');
+        setIsGeneratingQuestion(false);
+        return;
+      }
+
+      // Call API to generate question using AI (mode: 'ai_full')
+      // Include slide content so GPT can generate questions relevant to the PowerPoint material
+      const question = await questionsAPI.create(
+        lectureId,
+        'ai_full',
+        {
+          slide_content: lectureContent  // Send extracted slide content for context
+        },
+        user.user_id
+      );
+
+      // Set the question and show modal
+      setComprehensionQuestion(question);
+      setShowQuestionModal(true);
+    } catch (error) {
+      console.error('Failed to generate comprehension check:', error);
+      alert('Failed to generate question. Please try again.');
+    } finally {
+      setIsGeneratingQuestion(false);
+    }
+  };
+
+  // Close question modal
+  const closeQuestionModal = () => {
+    setShowQuestionModal(false);
+    setComprehensionQuestion(null);
   };
 
   // Get volume bar color based on level
@@ -1143,8 +1233,16 @@ const LiveLecture = () => {
                   <button className="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg text-sm transition-all">
                     💡 Ask for examples from class
                   </button>
-                  <button className="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg text-sm transition-all">
-                    🤔 Quick comprehension check
+                  <button 
+                    onClick={handleQuickComprehensionCheck}
+                    disabled={isGeneratingQuestion || !!comprehensionQuestion}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-all ${
+                      isGeneratingQuestion || comprehensionQuestion
+                        ? 'bg-slate-800/50 text-slate-500 cursor-not-allowed'
+                        : 'bg-slate-700/50 hover:bg-slate-600/50'
+                    }`}
+                  >
+                    {isGeneratingQuestion ? '🔄 Generating question...' : '🤔 Quick comprehension check'}
                   </button>
                   <button className="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-600/50 rounded-lg text-sm transition-all">
                     👥 Think-pair-share activity
@@ -1365,65 +1463,66 @@ const LiveLecture = () => {
                     <ChevronRight size={20} />
                   </button>
                 </div>
+                </div>
               </div>
             </div>
 
             {/* Student Participation Section */}
-            <div>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold flex items-center gap-3">
-                <Users size={28} />
-                Student Participation
-              </h2>
-              <div className="flex items-center gap-4">
-                <span className="text-slate-400">
-                  Present: <span className="font-bold text-green-400">{students.filter(s => s.present).length}</span> {students.length > 0 && ` / ${students.length}`}
-                </span>
+            <div className="mt-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                  <Users size={28} />
+                  Student Participation
+                </h2>
+                <div className="flex items-center gap-4">
+                  <span className="text-slate-400">
+                    Present: <span className="font-bold text-green-400">{students.filter(s => s.present).length}</span> {students.length > 0 && ` / ${students.length}`}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            <div className="glass-card p-6">
-              {studentsLoading ? (
-                <div className="text-center py-12 text-slate-400">Loading attendance...</div>
-              ) : students.length === 0 ? (
-                <div className="text-center py-12 text-slate-400">
-                  <Users size={48} className="mx-auto mb-4 opacity-50" />
-                  <p>No students have checked in yet.</p>
-                  <p className="text-sm mt-2">Students can join using the lecture code.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-4">
-                  {students.map((student) => (
-                  <motion.button
-                    key={student.id}
-                    whileHover={student.present ? { scale: 1.02 } : {}}
-                    whileTap={student.present ? { scale: 0.98 } : {}}
-                    onClick={() => handleStudentClick(student)}
-                    disabled={!student.present}
-                    className={`p-4 rounded-lg border-2 transition-all text-left ${
-                      student.present
-                        ? 'bg-slate-800/50 border-slate-600 hover:border-cyan-500 cursor-pointer'
-                        : 'bg-slate-900/50 border-slate-800 opacity-50 cursor-not-allowed'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <div className={`w-3 h-3 rounded-full ${student.present ? 'bg-green-500' : 'bg-red-500'}`} />
-                        <h3 className="font-bold">{student.name}</h3>
-                      </div>
-                      {student.participated > 0 && (
-                        <div className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 rounded-full">
-                          <CheckCircle size={14} className="text-cyan-400" />
-                          <span className="text-xs font-bold text-cyan-400">{student.participated}</span>
+              <div className="glass-card p-6">
+                {studentsLoading ? (
+                  <div className="text-center py-12 text-slate-400">Loading attendance...</div>
+                ) : students.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <Users size={48} className="mx-auto mb-4 opacity-50" />
+                    <p>No students have checked in yet.</p>
+                    <p className="text-sm mt-2">Students can join using the lecture code.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    {students.map((student) => (
+                      <motion.button
+                        key={student.id}
+                        whileHover={student.present ? { scale: 1.02 } : {}}
+                        whileTap={student.present ? { scale: 0.98 } : {}}
+                        onClick={() => handleStudentClick(student)}
+                        disabled={!student.present}
+                        className={`p-4 rounded-lg border-2 transition-all text-left ${
+                          student.present
+                            ? 'bg-slate-800/50 border-slate-600 hover:border-cyan-500 cursor-pointer'
+                            : 'bg-slate-900/50 border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${student.present ? 'bg-green-500' : 'bg-red-500'}`} />
+                            <h3 className="font-bold">{student.name}</h3>
+                          </div>
+                          {student.participated > 0 && (
+                            <div className="flex items-center gap-1 px-2 py-1 bg-cyan-500/20 rounded-full">
+                              <CheckCircle size={14} className="text-cyan-400" />
+                              <span className="text-xs font-bold text-cyan-400">{student.participated}</span>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400">Last active: {student.lastActive}</p>
-                  </motion.button>
-                ))}
-                </div>
-              )}
-            </div>
+                        <p className="text-xs text-slate-400">Last active: {student.lastActive}</p>
+                      </motion.button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {isRecording && (
@@ -1440,7 +1539,85 @@ const LiveLecture = () => {
             )}
           </div>
         </div>
-      </div>
+
+        {/* Quick Comprehension Check Modal - Overlay */}
+        <AnimatePresence>
+          {showQuestionModal && comprehensionQuestion && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+              onClick={closeQuestionModal}
+            >
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                onClick={(e) => e.stopPropagation()}
+                className="glass-card p-6 md:p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-bold text-cyan-400">🤔 Quick Comprehension Check</h2>
+                  <button
+                    onClick={closeQuestionModal}
+                    className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+                  >
+                    <X size={24} className="text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white mb-4">
+                      {comprehensionQuestion.question_text}
+                    </h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    {['option_a', 'option_b', 'option_c', 'option_d'].map((optionKey, idx) => {
+                      const letter = String.fromCharCode(97 + idx); // a, b, c, d
+                      const optionText = comprehensionQuestion[optionKey];
+                      const isCorrect = comprehensionQuestion.correct_answer === letter;
+                      
+                      return (
+                        <div
+                          key={optionKey}
+                          className={`p-4 rounded-lg border-2 transition-all ${
+                            isCorrect
+                              ? 'bg-green-900/30 border-green-500 text-green-100'
+                              : 'bg-slate-700/50 border-slate-600 text-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <span className={`font-bold text-lg ${
+                              isCorrect ? 'text-green-400' : 'text-slate-400'
+                            }`}>
+                              {letter.toUpperCase()}.
+                            </span>
+                            <span className="flex-1">{optionText}</span>
+                            {isCorrect && (
+                              <CheckCircle size={20} className="text-green-400 flex-shrink-0" />
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-700">
+                    <button
+                      onClick={closeQuestionModal}
+                      className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
     </div>
   );
 };

@@ -1,6 +1,6 @@
 # XP Lab - AI-Powered Lecture Assistant
 
-**XP Lab** (formerly ClassLens) is a two-sided platform that improves teaching quality AND boosts student engagement through AI, analytics, and Duolingo-style motivation.
+**XP Lab** (formerly ClassLens) is a two-sided platform that improves teaching quality AND boosts student engagement through AI, analytics, and a Duolingo-style gamified student interface.
 
 ![XP Lab Banner](https://img.shields.io/badge/React-18.3-blue) ![Vite](https://img.shields.io/badge/Vite-5.4-purple) ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-3.4-cyan)
 
@@ -16,7 +16,7 @@ XP Lab is a comprehensive education platform with two distinct user experiences:
 ### 🟩 Student Side
 - **Gamified Learning**: Duolingo-style experience with points, streaks, badges, and ranks
 - **Chapter Progression**: Visual learning path with lessons and quizzes
-- **Leaderboard**: Competitive rankings with Bronze → Silver → Gold → Platinum tiers
+- **Leaderboard**: Competitive rankings with Bronze → Silver → Gold → Platinum → Diamond → Master tiers
 - **Profile & Stats**: Personal analytics, weekly progress, and achievement tracking
 
 ## 🛠️ Tech Stack
@@ -85,7 +85,7 @@ API documentation: `http://localhost:8000/docs`
 ### Database Setup
 
 Create the following tables in your Supabase PostgreSQL database:
-See `database_schema.sql` for the complete schema.
+See `schema.sql` for the complete schema.
 
 ## 📁 Project Structure
 
@@ -135,7 +135,7 @@ XP-LAB/
 ### Gamification
 - Points system
 - Streaks per course
-- Ranks: Bronze (0-149), Silver (150-399), Gold (400-999), Platinum (1000+)
+- Ranks: Bronze (0-149), Silver (150-399), Gold (400-819), Platinum (820-1249), Diamond (1250-1499), Master (1500+)
 - Correct answer tracking
 - Badge system
 
